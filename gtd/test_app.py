@@ -348,16 +348,18 @@ def test_x_no_longer_ticks(tmp_path):
 
 
 
-def test_u_i_no_longer_switch_lists_and_shift_tab_goes_back(tmp_path):
-    assert run(tmp_path / "gtd.md", "i", "u").current is Section.IN
+def test_u_i_switch_lists_like_shift_tab_and_tab(tmp_path):
+    assert run(tmp_path / "gtd.md", "i").current is Section.NEXT
+    assert run(tmp_path / "gtd.md", "u").current is Section.DONE
     assert run(tmp_path / "gtd.md", "shift+tab").current is Section.DONE
 
 
-def test_j_k_and_left_no_longer_do_anything(tmp_path):
+def test_j_k_move_and_left_is_not_back_in_pop_ups(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(TWO_IN)
-    run(path, "j", "j", "space")               # j is not "down": nothing highlighted, nothing ticked
-    assert store.load(path).items(Section.DONE) == []
+    run(path, "j", "j", "k", "space")          # j/k move like ↓/↑: down to Beta, back up to Alpha
+    assert [i.text for i in store.load(path).items(Section.DONE)] == ["Alpha"]
+    path.write_text(TWO_IN)
     run(path, "down", "m", "left", "4")        # left is not "back" in a pop-up: 4 still picks Someday
     assert [i.text for i in store.load(path).items(Section.SOMEDAY)] == ["Alpha"]
 

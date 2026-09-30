@@ -50,8 +50,8 @@ LIST_KEYS = {
 KEYS_TAIL = "z undo · ← → lists · s later · w review · / search · ? keys"
 # Every key, grouped, for the ? screen.
 HELP = [
-    ("Move", [("↑ ↓", "move through the list"), ("Home End", "first / last item"),
-              ("PgUp PgDn", "a page up / down"), ("← → or Tab ⇧Tab", "previous / next list (or click a tab)"),
+    ("Move", [("↑ ↓ or j k", "move through the list"), ("Home End", "first / last item"),
+              ("PgUp PgDn", "a page up / down"), ("← → u i Tab ⇧Tab", "previous / next list (or click a tab)"),
               ("⇧↑ ⇧↓", "select rows from here, like a file manager")]),
     ("Act on the highlighted item", [("⏎", "clarify In/Someday · next action for a project · edit"),
                                      ("Space", "tick (or click the checkbox); on a ticked row untick; on Done reopen"),
@@ -198,6 +198,8 @@ class ItemList(OptionList, inherit_bindings=False):
 
     BINDINGS = [Binding("up", "cursor_up", show=False), Binding("down", "cursor_down", show=False),
                 Binding("left", "app.step_list(-1)", show=False), Binding("right", "app.step_list(1)", show=False),
+                Binding("j", "cursor_down", show=False), Binding("k", "cursor_up", show=False),
+                Binding("u", "app.step_list(-1)", show=False), Binding("i", "app.step_list(1)", show=False),
                 Binding("shift+up", "app.extend(-1)", show=False), Binding("shift+down", "app.extend(1)", show=False),
                 Binding("home", "first", show=False), Binding("end", "last", show=False),
                 Binding("pageup", "page_up", show=False), Binding("pagedown", "page_down", show=False),
