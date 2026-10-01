@@ -558,7 +558,8 @@ def test_both_areas_show_together_and_captures_go_to_work(tmp_path):
     app = run_areas(areas, "a", T("New idea"))
     assert [i.text for i in app.shown] == ["Work thing", "New idea", "Home thing"]
     assert texts(areas["work"].file) == ["Work thing", "New idea"]
-    assert app.describe(app.shown[2], set()).plain.endswith("home")
+    home_row = app.describe(app.shown[2], set())
+    assert any("#bae67e" in str(span.style) for span in home_row.spans if span.start == 0)   # green bar: home
 
 
 def test_each_change_goes_to_its_own_file(tmp_path):
@@ -1155,3 +1156,25 @@ def test_projects_list_shows_counts_and_groups_by_vault(tmp_path):
     assert [(k, getattr(v, "text", v)) for k, v in app.rows] == [
         ("header", "work"), ("item", "Maps"), ("header", "home"), ("item", "London move")]
     assert "1 next" in app.describe(app.rows[1][1], set()).plain
+
+
+def test_vault_switch_and_coloured_row_bars(tmp_path):
+    areas = two_areas(tmp_path)
+    app = GTDApp(areas, today=TODAY)
+    assert app.tabs_text().plain.startswith(" WORK  HOME  BOTH ")
+    item = app.docs["home"].items(Section.IN)[0]
+    row = app.describe(item, set())
+    assert row.plain.startswith("▌[ ]") and not row.plain.rstrip().endswith("home")
+    assert any("#bae67e" in str(span.style) for span in row.spans if span.start == 0)   # home is green
+
+
+def test_clicking_the_vault_switch(tmp_path):
+    areas = two_areas(tmp_path)
+
+    async def go():
+        app = GTDApp(areas, today=TODAY)
+        async with app.run_test(size=(100, 20)) as pilot:
+            await pilot.pause()
+            await pilot.click("#tabs", offset=(8, 0)); await pilot.pause()   # " WORK  HOME …": column 8 is HOME
+            return app.view_areas
+    assert asyncio.run(go()) == ["home"]

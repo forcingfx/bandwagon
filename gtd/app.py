@@ -136,6 +136,8 @@ class Tabs(Static):
     async def _on_click(self, event) -> None:
         if (index := event.style.meta.get("gtd_tab")) is not None:
             await self.app.action_go(index)
+        elif (area := event.style.meta.get("gtd_area")) is not None:
+            await self.app.action_show_area(area)
 
 
 class ItemList(OptionList, inherit_bindings=False):
@@ -593,8 +595,16 @@ class GTDApp(App):
         return next((n for n, (kind, _) in enumerate(self.rows) if kind == "item"), None)
 
     def tabs_text(self) -> Content:
-        """The lists as one row of tabs, the current one highlighted."""
+        """The vault switch (with two vaults), then the lists as one row of tabs."""
         parts: list = []
+        if len(self.areas) > 1:
+            choices = [(name, name.upper(), [name]) for name in self.areas] + [("", "BOTH", list(self.areas))]
+            for name, label, view in choices:
+                active = self.view_areas == view
+                colour = AREA_COLOURS.get(name, "#d9d7ce")
+                style = f"bold #212733 on {colour}" if active else ("dim " + colour if name else "dim")
+                parts.append(Content.styled(f" {label} ", style).stylize(Style.from_meta({"gtd_area": name})))
+            parts.append(("  ", ""))
         for n, sec in enumerate(LIST_ORDER):
             if n:
                 parts.append(("│", "dim"))
@@ -609,12 +619,13 @@ class GTDApp(App):
 
     def describe(self, item: model.Item, stalled: set, marked: bool = False) -> Content:
         """One row: a mark bar, a heavy checkbox, the text, then the tags dimmed."""
-        bar = ("▌", COUNT_COLOUR) if marked else " "
-        area = ("  " + item.area, "dim italic") if len(self.view_areas) > 1 and item.area else ""
+        colour = AREA_COLOURS.get(item.area, COUNT_COLOUR) if len(self.areas) > 1 else None
+        bar = ("▌", colour) if colour else " "          # the vault, at a glance
+        gap = ("●", COUNT_COLOUR) if marked else " "      # marked for a bulk action
         if item.raw is not None:
-            return Content.assemble(bar, item.line(), area)
+            return Content.assemble(bar, gap, item.line())
         box = Content.styled("[✔]", "bold #4ade80") if item.done else Content.styled("[ ]", "bold")
-        parts: list = [bar, box.stylize(Style.from_meta({"gtd_tick": True})), "  "]
+        parts: list = [bar, box.stylize(Style.from_meta({"gtd_tick": True})), gap, " "]
         if self.current is Section.PROJECTS and not self.project_view and item.project in stalled:
             parts.append(("⚠ no next action · ", "yellow"))
         # Proposals (items with a source) are dimmed so Arjun's own captures stand out; link
@@ -645,7 +656,6 @@ class GTDApp(App):
                              item.done_on and f"done:{item.done_on}") if t]
         if dates:
             parts.append(("  " + " ".join(dates), "dim"))
-        parts.append(area)
         return Content.assemble(*parts)
 
     def update_status(self) -> None:
@@ -670,8 +680,12 @@ class GTDApp(App):
             self.status_text, hints = self.allen_status(), f"{LIST_KEYS[self.current]} · {KEYS_TAIL}"
         self.keys_text = hints
         overdue = self.doc.last_review is None or (self.today - self.doc.last_review).days > 7
+        chip: list = []
+        if len(self.view_areas) == 1 and len(self.areas) > 1:  # a narrowed view says which vault, in colour
+            name = self.view_areas[0]
+            chip = [(f" {name.upper()} ", f"bold #212733 on {AREA_COLOURS.get(name, COUNT_COLOUR)}"), " "]
         self.query_one("#status", Static).update(Content.assemble(
-            (self.status_text, "bold yellow" if overdue and self.review_step is None else "bold")))
+            *chip, (self.status_text, "bold yellow" if overdue and self.review_step is None else "bold")))
         self.query_one("#keys", Static).update(hints)
 
     def allen_status(self) -> str:
