@@ -5,6 +5,7 @@ import json
 import subprocess
 from datetime import date
 from functools import partial
+import hashlib
 from pathlib import Path
 from urllib.parse import quote
 
@@ -578,7 +579,8 @@ class GTDApp(App):
         Binding("m", "move", "Move"),
         Binding("q", "quit", "Quit"),
     ]
-    WATCH_SECONDS = 2.0  # how often to check gtd.md for edits made outside the app
+    WATCH_SECONDS = 1.0  # how often to check gtd.md for edits made outside the app
+    FORCE_EVERY = 5      # every 5th check re-reads the file even if size and mtime look unchanged
     DATE_STATE = dates.STATE  # last-used dates; tests point this elsewhere
 
     def __init__(self, areas: dict[str, config.Area] | Path | str, today: date | None = None,
@@ -593,6 +595,8 @@ class GTDApp(App):
         self.capture_area = capture if capture in self.areas else next(iter(self.areas))
         self.today = today or date.today()
         self.load()
+        self.seen: dict[str, tuple] = {}
+        self.polls = 0
         self.seen = self.stamps()
         self.current = Section.IN
         self.context_filter: str | None = None
@@ -632,7 +636,9 @@ class GTDApp(App):
             items = [i for i in items if self.context_filter in i.contexts]
         if self.current is Section.NEXT:
             items = sorted(items, key=lambda i: i.contexts[0] if i.contexts else "~")
-        own, proposals = in_order(items)
+        outside = ([] if self.current is Section.DONE  # ticked in Obsidian, not yet filed
+                   else [i for i in items if i.done and i.raw is None])
+        own, proposals = in_order([i for i in items if not any(i is o for o in outside)])
         self.shown = own + proposals
         self.marked &= {(i.area, i.line()) for i in self.shown}
         rows: list[tuple[str, object]] = [("item", i) for i in own]
@@ -640,7 +646,9 @@ class GTDApp(App):
             rows += [("divider", f"proposals · {len(proposals)}")] + [("item", i) for i in proposals]
         # Resolve ticked items against the file; drop any that left Done (undo, outside edit).
         done = {x.line(): x for x in self.doc.items(Section.DONE)}
-        if ticked := [(done[t.line()], pos) for t, pos in self.ticked.get(self.current, []) if t.line() in done]:
+        ticked = [(done[t.line()], pos) for t, pos in self.ticked.get(self.current, []) if t.line() in done]
+        ticked += [(i, n) for n, i in enumerate(self.doc.items(self.current)) if any(i is o for o in outside)]
+        if ticked:
             self.ticked[self.current] = ticked
             rows += [("divider", f"ticked · {len(ticked)}")] + [("ticked", entry) for entry in ticked]
         else:
@@ -789,20 +797,47 @@ class GTDApp(App):
         merged.prune_manual = all(d.prune_manual for d in shown)
         self.doc = merged
 
-    def stamps(self) -> dict[str, int | None]:
-        def stamp(path: Path) -> int | None:
-            try:
-                return path.stat().st_mtime_ns
-            except FileNotFoundError:
-                return None
-        return {name: stamp(area.file) for name, area in self.areas.items()}
+    def file_state(self, path: Path, previous: tuple | None, force: bool) -> tuple:
+        """(size, mtime, inode) plus a hash of the content. The hash is recomputed when the
+        stat changes or when forced, because some sync clients write new content with the
+        remote device's modification time, which a stat-only check would miss."""
+        try:
+            st = path.stat()
+        except FileNotFoundError:
+            return (None, None)
+        key = (st.st_size, st.st_mtime_ns, st.st_ino)
+        if previous and previous[0] == key and not force:
+            return previous
+        return (key, hashlib.sha1(path.read_bytes()).hexdigest())
+
+    def stamps(self, force: bool = True) -> dict[str, tuple]:
+        return {name: self.file_state(area.file, self.seen.get(name), force) for name, area in self.areas.items()}
 
     async def watch_file(self) -> None:
-        """Pick up edits from Obsidian, Sync or the CLI without a reload key."""
-        if (now := self.stamps()) != self.seen:
+        """Pick up edits from Obsidian, Sync or the CLI without a reload key, and say what
+        arrived from elsewhere."""
+        self.polls += 1
+        now = self.stamps(force=self.polls % self.FORCE_EVERY == 0)
+        if {n: v[1] for n, v in now.items()} == {n: v[1] for n, v in self.seen.items()}:
             self.seen = now
-            self.load()
-            await self.render_lists()
+            return
+        self.seen = now
+        before = self.item_states()
+        self.load()
+        self.announce_sync(before, self.item_states())
+        await self.render_lists()
+
+    def item_states(self) -> dict[tuple[str, str], bool]:
+        """(area, text) → done, for every item, to describe what an outside change did."""
+        return {(i.area, i.text): i.done or s is Section.DONE
+                for s in Section for i in self.doc.items(s) if i.raw is None}
+
+    def announce_sync(self, before: dict, after: dict) -> None:
+        ticked = sum(1 for k, done in after.items() if done and before.get(k) is False)
+        added = sum(1 for k, done in after.items() if not done and k not in before)
+        parts = [f"{ticked} ticked"] * bool(ticked) + [f"{added} added"] * bool(added)
+        self.last_toast = " · ".join(["Synced from another device", *parts])
+        self.notify(self.last_toast, timeout=4)
 
     async def change(self, fn, area: str | None = None) -> None:
         """Apply one change to one area's file (or, with no area, to every visible one),
@@ -1190,6 +1225,11 @@ class GTDApp(App):
         section = self.current
         if entry := self.selected_ticked():
             done_item, pos = entry
+            if section is not Section.DONE and any(done_item is i for i in self.doc.items(section)):
+                # ticked in Obsidian and not yet filed: untick it where it is
+                locate = self.on_disk(section, done_item)
+                await self.change(lambda d: (it := locate(d)) and setattr(it, "done", False), done_item.area)
+                return self.toast(f"Unticked “{done_item.text}”")
             self.ticked[section].remove(entry)
             locate = self.on_disk(Section.DONE, done_item)
             await self.change(lambda d: (it := locate(d)) and model.uncomplete(d, it, section, pos), done_item.area)

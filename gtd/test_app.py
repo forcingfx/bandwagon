@@ -1016,3 +1016,33 @@ def test_clarify_screens_show_the_step_bar(tmp_path):
 def test_review_status_shows_the_step_bar(tmp_path):
     app = run(tmp_path / "gtd.md", "w", "n")
     assert app.status_text.startswith("Review 2/5 · Get Clear ✓ › Next Actions › Waiting For › Projects › Someday")
+
+
+def test_outside_write_with_old_mtime_is_picked_up_and_announced(tmp_path):
+    import os
+    path = tmp_path / "gtd.md"
+    path.write_text("<!-- gtd v1 -->\n\n## Next Actions\n- [ ] Alpha\n- [ ] Beta\n")
+
+    async def go():
+        app = GTDApp(path, today=TODAY)
+        async with app.run_test() as pilot:
+            await pilot.press("right"); await pilot.pause()
+            old = os.stat(path)
+            # another device ticks Beta and adds Gamma; the sync client keeps the old mtime
+            path.write_text("<!-- gtd v1 -->\n\n## Next Actions\n- [ ] Alpha\n- [x] Beta\n- [ ] Gamma\n")
+            os.utime(path, ns=(old.st_atime_ns, old.st_mtime_ns))
+            for _ in range(6):                       # up to the forced re-read
+                await app.watch_file()
+            await pilot.pause()
+            return [i.text for i in app.shown], [t.text for t, _ in app.ticked.get(Section.NEXT, [])], app.last_toast
+    shown, ticked, toast = asyncio.run(go())
+    assert shown == ["Alpha", "Gamma"]
+    assert ticked == ["Beta"]                        # an outside [x] shows like an app tick
+    assert toast == "Synced from another device · 1 ticked · 1 added"
+
+
+def test_space_on_an_obsidian_tick_unticks_it_in_place(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text("<!-- gtd v1 -->\n\n## In\n- [ ] Alpha\n- [x] Beta\n")
+    run(path, "down", "down", "space")     # row 2 is the divider-skipped ticked Beta
+    assert [(i.text, i.done) for i in store.load(path).items(Section.IN)] == [("Alpha", False), ("Beta", False)]
