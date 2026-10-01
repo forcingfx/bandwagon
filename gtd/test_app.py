@@ -1113,3 +1113,45 @@ def test_l_sets_contexts_and_p_moves_to_waiting(tmp_path):
     run(path, "right", "p", T("Mike"))
     [waiting] = store.load(path).items(Section.WAITING)
     assert (waiting.text, waiting.waiting) == ("Draft agenda", "mike")
+
+
+PROJECT_FILE = ("<!-- gtd v1 -->\n\n## Next Actions\n- [ ] Spec v2 @computer +maps\n- [ ] Unrelated @calls\n\n"
+                "## Projects\n- [ ] Maps relaunch +maps\n- [ ] Offsite +offsite\n\n"
+                "## Waiting For\n- [ ] Design review +maps waiting:amber\n\n## Someday/Maybe\n- [ ] Dark mode +maps\n")
+
+
+def test_enter_on_a_project_opens_its_page(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text(PROJECT_FILE)
+    app = run(path, *["tab"] * 2, "enter")
+    assert app.project_view == ("main", "maps")
+    assert [(kind, getattr(v, "text", v)) for kind, v in app.rows] == [
+        ("divider", "Next Actions"), ("item", "Spec v2"), ("divider", "Waiting For"), ("item", "Design review"),
+        ("divider", "Someday/Maybe"), ("item", "Dark mode")]
+    assert "Projects 2 › Maps relaunch │" in app.tabs_text().plain
+
+
+def test_project_page_actions_work_and_escape_returns(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text(PROJECT_FILE)
+    app = run(path, *["tab"] * 2, "enter", "space", "escape")       # tick Spec v2 from the page, then back
+    assert [i.text for i in store.load(path).items(Section.DONE)] == ["Spec v2"]
+    assert app.project_view is None and app.current is Section.PROJECTS
+
+
+def test_a_on_a_project_page_captures_into_the_project(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text(PROJECT_FILE)
+    run(path, *["tab"] * 2, "enter", "a", *"Launch post", "tab", T("Press list"))
+    nexts = [(i.text, i.project, i.context) for i in store.load(path).items(Section.NEXT)]
+    assert ("Launch post", "maps", None) in nexts and ("Press list", "maps", None) in nexts
+
+
+def test_projects_list_shows_counts_and_groups_by_vault(tmp_path):
+    areas = two_areas(tmp_path)
+    areas["work"].file.write_text("<!-- gtd v1 -->\n\n## Next Actions\n- [ ] Spec +maps\n\n## Projects\n- [ ] Maps +maps\n")
+    areas["home"].file.write_text("<!-- gtd v1 -->\n\n## Projects\n- [ ] London move +london\n")
+    app = run_areas(areas, *["tab"] * 2)
+    assert [(k, getattr(v, "text", v)) for k, v in app.rows] == [
+        ("header", "work"), ("item", "Maps"), ("header", "home"), ("item", "London move")]
+    assert "1 next" in app.describe(app.rows[1][1], set()).plain

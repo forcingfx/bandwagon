@@ -450,6 +450,7 @@ class GTDApp(App):
         super().__init__()
         self.contexts = contexts or config.DEFAULT_CONTEXTS
         self.show_later = False  # tasks whose start: is after today stay hidden until toggled
+        self.project_view: tuple[str, str] | None = None  # (area, slug) while a project page is open
         self.header: Content | None = None  # the clarify step bar while clarify runs
         self.clarify_progress: tuple[int, int] | None = None
         self.areas = areas if isinstance(areas, dict) else config.single(Path(areas))
@@ -493,6 +494,8 @@ class GTDApp(App):
         """Redraw everything, keeping the highlight where it was."""
         self.query_one("#tabs", Static).update(self.tabs_text())
         stalled = {p.project for p in model.stalled_projects(self.doc)}
+        if self.project_view:
+            return await self.render_project_page(stalled)
         items = self.visible_items(self.current)
         if self.current is Section.NEXT and self.context_filter:
             items = [i for i in items if self.context_filter in i.contexts]
@@ -504,6 +507,10 @@ class GTDApp(App):
         self.shown = own + proposals
         self.marked &= {(i.area, i.line()) for i in self.shown}
         rows: list[tuple[str, object]] = [("item", i) for i in own]
+        if self.current is Section.PROJECTS and len(self.view_areas) > 1:  # one coloured block per vault
+            rows = [row for area in self.view_areas for row in
+                    ([("header", area)] + [("item", i) for i in own if i.area == area]
+                     if any(i.area == area for i in own) else [])]
         if proposals:  # automated proposals sit below Arjun's own captures
             rows += [("divider", f"proposals · {len(proposals)}")] + [("item", i) for i in proposals]
         # Resolve ticked items against the file; drop any that left Done (undo, outside edit).
@@ -515,6 +522,9 @@ class GTDApp(App):
             rows += [("divider", f"ticked · {len(ticked)}")] + [("ticked", entry) for entry in ticked]
         else:
             self.ticked.pop(self.current, None)
+        self.draw_rows(rows, stalled)
+
+    def draw_rows(self, rows: list, stalled: set) -> None:
         self.rows = rows
         view = self.query_one("#items", ItemList)
         index = view.highlighted
@@ -523,9 +533,48 @@ class GTDApp(App):
         view.highlighted = self.nearest_row(index)
         self.update_status()
 
+    PAGE_SECTIONS = [Section.NEXT, Section.WAITING, Section.SOMEDAY, Section.IN, Section.DONE]
+
+    async def render_project_page(self, stalled: set) -> None:
+        """Every item tagged +slug in the project's vault, under one divider per list."""
+        area, slug = self.project_view
+        doc = self.docs[area]
+        rows: list[tuple[str, object]] = []
+        self.shown = []
+        for section in self.PAGE_SECTIONS:
+            items = [i for i in doc.items(section) if i.project == slug and i.raw is None
+                     and (self.show_later or not model.starts_later(i, self.today))]
+            if items:
+                rows += [("divider", section.value)] + [("item", i) for i in items]
+                self.shown += items
+        self.marked &= {(i.area, i.line()) for i in self.shown}
+        self.draw_rows(rows, stalled)
+
+    def section_of(self, item: model.Item) -> Section:
+        """The list an item lives in (a project page shows items from several)."""
+        return next((s for s in Section if any(i is item for i in self.doc.items(s))), self.current)
+
+    async def open_project(self, item: model.Item) -> None:
+        self.project_view = (item.area, item.project)
+        await self.render_lists()
+        view = self.query_one("#items", ItemList)
+        view.focus()
+        view.highlighted = self.first_row()
+
+    async def close_project(self) -> None:
+        slug = self.project_view[1] if self.project_view else None
+        self.project_view = None
+        await self.render_lists()
+        view = self.query_one("#items", ItemList)
+        view.highlighted = next((n for n, (k, v) in enumerate(self.rows) if k == "item" and v.project == slug),
+                                self.first_row())
+
     def option(self, kind: str, value, stalled: set) -> Option:
         if kind == "divider":
             return Option(Content.styled(f"── {value} ──", "dim"), disabled=True)
+        if kind == "header":
+            colour = AREA_COLOURS.get(value, COUNT_COLOUR)
+            return Option(Content.styled(f" {value.upper()} ", f"bold #212733 on {colour}"), disabled=True)
         item = value[0] if kind == "ticked" else value
         return Option(self.describe(item, stalled, marked=(item.area, item.line()) in self.marked))
 
@@ -533,7 +582,7 @@ class GTDApp(App):
         """The selectable row closest to `index`, looking up first (after a row left the list)."""
         if index is None:
             return None
-        selectable = [n for n, (kind, _) in enumerate(self.rows) if kind != "divider"]
+        selectable = [n for n, (kind, _) in enumerate(self.rows) if kind not in ("divider", "header")]
         before = [n for n in selectable if n <= index]
         return before[-1] if before else (selectable[0] if selectable else None)
 
@@ -553,6 +602,9 @@ class GTDApp(App):
             tab = Content.assemble((f" {TAB_NAMES[sec]} ", here.strip()),
                                    (f"{len(self.visible_items(sec))} ", here + COUNT_COLOUR))
             parts.append(tab.stylize(Style.from_meta({"gtd_tab": n})))
+            if sec is Section.PROJECTS and self.project_view:  # breadcrumb to the open project
+                area, slug = self.project_view
+                parts.append((f"› {self.title_of(area, slug)} ", "bold"))
         return Content.assemble(*parts)
 
     def describe(self, item: model.Item, stalled: set, marked: bool = False) -> Content:
@@ -563,7 +615,7 @@ class GTDApp(App):
             return Content.assemble(bar, item.line(), area)
         box = Content.styled("[✔]", "bold #4ade80") if item.done else Content.styled("[ ]", "bold")
         parts: list = [bar, box.stylize(Style.from_meta({"gtd_tick": True})), "  "]
-        if self.current is Section.PROJECTS and item.project in stalled:
+        if self.current is Section.PROJECTS and not self.project_view and item.project in stalled:
             parts.append(("⚠ no next action · ", "yellow"))
         # Proposals (items with a source) are dimmed so Arjun's own captures stand out; link
         # syntax is shown as its label, underlined, and o opens it.
@@ -578,6 +630,8 @@ class GTDApp(App):
             parts.append(("  " if n == 0 else " · ", "dim"))
             label = label if len(label) <= CHIP_MAX else label[:CHIP_MAX - 1] + "…"
             parts.append(self.link_part(label, url, base) if url else (label, "dim"))
+        if self.current is Section.PROJECTS and not self.project_view and item.project and not item.done:
+            parts.append((f"  {self.project_counts(item)}", "dim"))
         tags = [t for t in (*item.contexts, item.every and f"every:{item.every}") if t]
         if tags:
             parts.append(("  " + " ".join(tags), "dim"))
@@ -769,9 +823,12 @@ class GTDApp(App):
         await self.render_lists()
 
     async def action_step_list(self, step: int) -> None:
+        if self.project_view:  # ← and → leave a project page first
+            return await self.close_project()
         await self.action_go((LIST_ORDER.index(self.current) + step) % len(LIST_ORDER))
 
     async def action_go(self, index: int) -> None:
+        self.project_view = None
         await self.show(LIST_ORDER[index])
         view = self.query_one("#items", ItemList)
         view.focus()
@@ -889,13 +946,21 @@ class GTDApp(App):
         """Capture one (Enter) or many (Tab between items). On close,
         the first item of the batch is highlighted so `c` clarifies it next."""
         if captured := await self.push_screen_wait(CaptureScreen(self.save_capture)):
-            await self.show(Section.IN)
+            if self.project_view:  # captured into the open project: stay on its page
+                await self.render_lists()
+            else:
+                await self.show(Section.IN)
             view = self.query_one("#items", ItemList)
             view.focus()
             view.highlighted = self.row_of(captured[0].line())
 
     async def save_capture(self, text: str) -> model.Item:
+        """A capture lands in In, or, on a project page, straight into the project."""
         saved: list[model.Item] = []
+        if self.project_view:
+            area, slug = self.project_view
+            await self.change(lambda d: saved.append(model.defer(d, None, text, None, slug, self.today)), area)
+            return saved[0]
         area = self.view_areas[0] if len(self.view_areas) == 1 else self.capture_area
         await self.change(lambda d: saved.append(model.capture(d, text, self.today)), area)
         return saved[0]
@@ -907,13 +972,14 @@ class GTDApp(App):
         """c. On In: clarify from the highlighted item, then the rest of In. On a project:
         capture tasks into it. Anywhere else: re-clarify the highlighted item, every row
         prefilled, so any answer can change (this is also how an item moves between lists)."""
-        here, item = self.current, self.selected()
+        item = self.selected()
+        here = self.section_of(item) if item is not None else self.current
         if here is Section.PROJECTS and item is not None:
             await self.clarify(item, None, "tasks", existing=item.project, locked_project=True, kind="addto")
             return await self.show(here)
-        if here is not Section.IN and item is not None:
+        if (here is not Section.IN or self.project_view) and item is not None:
             await self.clarify(item, here, "what", **prefill_from_item(item, here))
-            return await self.show(here)
+            return await self.render_lists() if self.project_view else await self.show(here)
         first = item if here is Section.IN else None
         await self.show(Section.IN)
         self.clarify_progress = (1, len(self.doc.items(Section.IN)))
@@ -999,7 +1065,7 @@ class GTDApp(App):
     async def action_edit_field(self, field: str) -> None:
         if not (item := self.selected()) or item.raw is not None:
             return
-        section = self.current
+        section = self.section_of(item)
         a = await self.push_screen_wait(self.card(item, fields=[field], preset=prefill_from_item(item, section)))
         if a is None:
             return
@@ -1037,7 +1103,7 @@ class GTDApp(App):
         """Space. On an open item: tick it into Done and the ticked section below the list.
         On a ticked row: untick it back into place. On the Done tab: reopen it where its
         tags say it belongs."""
-        section = self.current
+        section = self.section_of(self.selected()) if self.selected() else self.current
         if entry := self.selected_ticked():
             done_item, pos = entry
             if section is not Section.DONE and any(done_item is i for i in self.doc.items(section)):
@@ -1097,7 +1163,7 @@ class GTDApp(App):
             await self.change_each({area: drop(area) for area in {a for a, _ in marked}})
             return self.toast(f"Deleted {len(marked)} item{'s' if len(marked) != 1 else ''}")
         if item := self.selected():
-            locate = self.on_disk(self.current, item)
+            locate = self.on_disk(self.section_of(item), item)
             await self.change(lambda d: model.trash(d, locate(d)), item.area)
             self.toast(f"Deleted “{item.text}”")
 
@@ -1157,14 +1223,29 @@ class GTDApp(App):
         return Content.styled(label, f"{base} underline {LINK_COLOUR}".strip()).stylize(
             Style.from_meta({"gtd_link": url}))
 
+    def project_counts(self, item: model.Item) -> str:
+        doc = self.docs.get(item.area)
+        if not doc:
+            return ""
+        counts = [(len([i for i in doc.items(s) if i.project == item.project and not i.done]), label)
+                  for s, label in ((Section.NEXT, "next"), (Section.WAITING, "waiting"), (Section.SOMEDAY, "someday"))]
+        return " · ".join(f"{n} {label}" for n, label in counts if n) or "no tasks"
+
     def project_title(self, item: model.Item) -> str:
-        """A project's short name: its note's first "# " heading, else its slug in words."""
+        """A project's short name: its note's first "# " heading, else its own line in Projects
+        when that is short, else its slug in words."""
         key = (item.area, "title", item.project)
         if key not in self._tag_notes:
             title = None
             if note := self.tag_note(item, "project", item.project):
                 path = self.areas[item.area].file.parent / f"{note}.md"
                 title = next((ln[2:].strip() for ln in path.read_text().splitlines() if ln.startswith("# ")), None)
+            if not title:  # no note heading: the project's own line, unless it is a long description
+                doc = self.docs.get(item.area)
+                line = next((p for p in (doc.items(Section.PROJECTS) if doc else [])
+                             if p.project == item.project and p.raw is None), None)
+                text = model.split_trailing_links(line.text)[0] if line else ""
+                title = text if 0 < len(text) <= 40 else None
             self._tag_notes[key] = title or item.project.replace("-", " ").title()
         return self._tag_notes[key]
 
@@ -1229,6 +1310,8 @@ class GTDApp(App):
             await self.render_lists()
 
     async def action_escape(self) -> None:
+        if self.project_view and not self.marked:
+            return await self.close_project()
         if self.marked:
             self.marked.clear()
             self.anchor = None
@@ -1240,7 +1323,10 @@ class GTDApp(App):
         action on Projects, edit everywhere else."""
         if self.selected() is None:
             return
-        if self.current in (Section.IN, Section.PROJECTS, Section.SOMEDAY):
+        item = self.selected()
+        if self.current is Section.PROJECTS and not self.project_view and item.project:
+            return await self.open_project(item)
+        if self.section_of(item) in (Section.IN, Section.SOMEDAY):
             self.action_clarify()
         else:
             self.action_edit()
@@ -1262,7 +1348,8 @@ class GTDApp(App):
     async def action_edit(self) -> None:
         if not (item := self.selected()):
             return
-        locate, prefix = self.on_disk(self.current, item), item.line()[:6]
+        section = self.section_of(item)
+        locate, prefix = self.on_disk(section, item), item.line()[:6]
         body = await self.text("Edit (tags at the end: @context +project waiting:who)",
                                item.line()[6:] if item.raw is None else item.line())
         if not body:
@@ -1270,7 +1357,7 @@ class GTDApp(App):
         new = store.parse_item(prefix + body if item.raw is None else body)
 
         def replace(d):
-            items = d.items(self.current)
+            items = d.items(section)
             if (old := locate(d)) is not None:
                 items[next(i for i, x in enumerate(items) if x is old)] = new
         await self.change(replace, item.area)
