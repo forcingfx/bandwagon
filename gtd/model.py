@@ -244,15 +244,17 @@ def do_now(doc: Doc, source: Item | None, action: str, project: str | None, toda
 def delegate(doc: Doc, source: Item | None, action: str, who: str, project: str | None, today: date,
              due: date | None = None, start: date | None = None) -> None:
     doc.remove(source)
-    doc.items(Section.WAITING).append(
-        Item(text=action.strip(), project=project, waiting=who.strip().lower(), start=start, due=due, since=today))
+    item = Item(text=action.strip(), project=project, waiting=who.strip().lower(), start=start, due=due, since=today)
+    doc.items(Section.WAITING).append(item)
+    return item
 
 
 def defer(doc: Doc, source: Item | None, action: str, context: str | None, project: str | None, today: date,
           due: date | None = None, start: date | None = None) -> None:
     doc.remove(source)
-    doc.items(Section.NEXT).append(Item(text=action.strip(), context=context, project=project, start=start,
-                                        due=due, added=today))
+    item = Item(text=action.strip(), context=context, project=project, start=start, due=due, added=today)
+    doc.items(Section.NEXT).append(item)
+    return item
 
 
 # Organize and reflect

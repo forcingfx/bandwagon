@@ -21,6 +21,8 @@ from textual.widgets import Input, OptionList, Static
 from textual.widgets.option_list import Option
 
 from . import config, dates, model, store
+from .clarify import ClarifyScreen, prefill_from_item
+from .datescreen import DatePicker, DateScreen
 from .model import Section
 
 LIST_ORDER = [Section.IN, Section.NEXT, Section.PROJECTS, Section.WAITING, Section.SOMEDAY, Section.DONE]
@@ -41,14 +43,14 @@ TAB_NAMES = {Section.IN: "In", Section.NEXT: "Next", Section.PROJECTS: "Projects
              Section.WAITING: "Waiting", Section.SOMEDAY: "Someday", Section.DONE: "Done"}
 # The key line follows the list you're on (lazygit-style); the tail is the same everywhere.
 LIST_KEYS = {
-    Section.IN: "a capture · ⏎ clarify · space tick · t dates · o open · x mark · ⌫ delete",
-    Section.NEXT: "space tick · ⏎ edit · t dates · o open · f context · x mark · ⌫ delete",
-    Section.PROJECTS: "⏎ add next action · space tick · x mark · ⌫ delete",
-    Section.WAITING: "space received · ⏎ edit · o open · x mark · ⌫ delete",
-    Section.SOMEDAY: "⏎ clarify · x mark · ⌫ delete · a capture",
+    Section.IN: "a capture · ⏎ clarify · space tick · d dates · o open · x mark · ⌫ delete",
+    Section.NEXT: "space tick · m project · l context · d dates · c re-clarify · f filter · o open · ⌫ delete",
+    Section.PROJECTS: "⏎ open · c add tasks · space tick · x mark · ⌫ delete",
+    Section.WAITING: "space received · p who · d dates · m project · c re-clarify · o open · ⌫ delete",
+    Section.SOMEDAY: "⏎ clarify · c re-clarify · d dates · x mark · ⌫ delete · a capture",
     Section.DONE: "space reopen · x mark · ⌫ delete",
 }
-KEYS_TAIL = "z undo · ← → lists · s later · w review · / search · ? keys"
+KEYS_TAIL = "z undo · ← → lists · v vault · s later · w review · / search · ? keys"
 # Every key, grouped, for the ? screen.
 HELP = [
     ("Move", [("↑ ↓ or j k", "move through the list"), ("Home End", "first / last item"),
@@ -58,8 +60,9 @@ HELP = [
                                      ("Space", "tick (or click the checkbox); on a ticked row untick; on Done reopen"),
                                      ("o", "open a link in the item (a picker if it has several)"),
                                      ("x", "mark for a bulk delete"), ("⌫ Del", "delete the marked rows, or this one"),
-                                     ("e", "edit"), ("m", "move to another list"),
-                                     ("t", "dates: type 2, fri, dec 5 or -3 (before due) and pick a suggestion"),
+                                     ("e", "edit the text"), ("c", "re-clarify: change anything, move lists"),
+                                     ("m", "project"), ("l", "context"), ("p", "waiting for (moves to Waiting For)"),
+                                     ("d", "dates: type 2, fri, dec 5 or -3 (before due) and pick a suggestion"),
                                      ("z", "undo the last change")]),
     ("The five steps", [("a", "capture (Tab: save and capture another)"), ("c", "clarify In"),
                         ("w", "weekly review (n next step, Esc stop)"), ("f", "show one context in Next Actions"),
@@ -91,43 +94,7 @@ def follow_script(workspace: str | None) -> str | None:
             "sleep 0.25; done")
 
 
-STEP_NAMES = {"what": "What is it", "outcome": "Outcome", "action": "Action", "project": "Project",
-              "how": "How", "context": "Context", "context_other": "Context", "who": "Who", "dates": "Dates"}
-CHOICES = {1: "One action", 2: "A project", 3: "Someday/Maybe", 4: "Trash", 5: "Reference"}
-
-
-def predict_path(a: dict, start: str, has_projects: bool) -> list[str]:
-    """The clarify steps the answers so far lead to; unanswered choices are assumed to take
-    the default branch (one action, deferred)."""
-    if start == "what":
-        path = ["what"]
-        if a.get("actionable") is False:
-            return path
-        if a.get("kind") == "project":
-            path += ["outcome", "action"]
-        else:
-            path += ["action"] + (["project"] if has_projects and not a.get("existing") else [])
-    elif start == "outcome":
-        path = ["outcome", "action"]
-    else:
-        path = ["action"]
-    path.append("how")
-    if a.get("how") == "now":
-        return path
-    return path + (["who", "dates"] if a.get("how") == "delegate" else ["context", "dates"])
-
-
-def step_bar(path: list[str], current: str, progress: tuple[int, int] | None) -> Content:
-    """Item 3 of 12 · What is it ✓ › Action › …: done steps ticked, the current one bold."""
-    current = "context" if current == "context_other" else current
-    here = path.index(current) if current in path else 0
-    parts: list = [(f"Item {progress[0]} of {progress[1]} · ", "dim")] if progress else []
-    for n, step in enumerate(path):
-        if n:
-            parts.append((" › ", "dim"))
-        name = STEP_NAMES[step]
-        parts.append((f"{name} ✓", "dim") if n < here else (name, "bold") if n == here else (name, "dim"))
-    return Content.assemble(*parts)
+AREA_COLOURS = {"work": "#73d0ff", "home": "#bae67e"}   # the kitty palette's blue and green
 
 
 def open_externally(url: str) -> None:
@@ -256,7 +223,12 @@ class HelpScreen(ModalScreen[None]):
 class AskScreen(ModalScreen[int | None]):
     """A question with numbered answers. 1-9 picks, 0 or Esc goes back one screen."""
 
-    BINDINGS = [Binding("escape", "back", "Back"), Binding("0", "back", "Back")]
+    BINDINGS = [Binding("escape", "back", "Back"), Binding("0", "back", "Back"),
+                Binding("j", "cursor(1)", show=False), Binding("k", "cursor(-1)", show=False)]
+
+    def action_cursor(self, step: int) -> None:
+        options = self.query_one(OptionList)
+        options.action_cursor_down() if step > 0 else options.action_cursor_up()
 
     def __init__(self, question: str, labels: list[str], header: Content | None = None) -> None:
         super().__init__()
@@ -290,7 +262,12 @@ class ContextScreen(ModalScreen[list | None]):
     contexts, ["other"] for "Other…", or None to go back."""
 
     BINDINGS = [Binding("escape", "back", "Back"), Binding("0", "back", "Back"),
-                Binding("space", "toggle", "Toggle", priority=True)]
+                Binding("space", "toggle", "Toggle", priority=True),
+                Binding("j", "cursor(1)", show=False), Binding("k", "cursor(-1)", show=False)]
+
+    def action_cursor(self, step: int) -> None:
+        options = self.query_one(OptionList)
+        options.action_cursor_down() if step > 0 else options.action_cursor_up()
 
     def __init__(self, question: str, contexts: list[str], chosen: list[str] | None = None,
                  header: Content | None = None) -> None:
@@ -337,125 +314,6 @@ class ContextScreen(ModalScreen[list | None]):
 
     def action_back(self) -> None:
         self.dismiss(None)
-
-
-class DateScreen(ModalScreen):
-    """Due and start dates, Superhuman-style: type a few characters and pick from live
-    suggestions (see dates.py). Enter takes the highlighted suggestion: on Due, "no date"
-    finishes the screen (one key to skip), a date moves on to Start; on Start it finishes.
-    Tab switches field, ↑/↓ move through suggestions, Esc goes back. Dismisses with
-    (due, start) or "back"."""
-
-    BINDINGS = [Binding("escape", "back", "Back"), Binding("tab", "switch", "Switch", priority=True),
-                Binding("up", "move(-1)", show=False), Binding("down", "move(1)", show=False)]
-    WIDTH = 60  # characters in a suggestion row: phrase on the left, date on the right
-
-    def __init__(self, today: date, due: date | None = None, start: date | None = None,
-                 header: Content | None = None, title: str = "When?", state: Path | None = None) -> None:
-        super().__init__()
-        self.today, self.header, self.title, self.state = today, header, title, state or dates.STATE
-        self.values = {"due": due, "start": start}
-        self.field = "due"
-        self.rows: list[dates.Suggestion] = []
-
-    def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
-            if self.header:
-                yield Static(self.header, classes="stepbar")
-            yield Static(self.title, classes="question", markup=False)
-            for field in ("due", "start"):
-                with Horizontal(classes="datefield"):
-                    yield Static(id=f"{field}-label", markup=False)
-                    yield Input(value=str(self.values[field] or ""), placeholder="Try: 3 days, fri, dec 5", id=field)
-            yield OptionList(id="suggestions")
-            yield Static("↑↓ pick · Enter take · Tab due/start · Esc back", classes="hint", markup=False)
-
-    def on_mount(self) -> None:
-        self.query_one("#due", Input).focus()
-        self.refresh_rows()
-
-    def refresh_rows(self) -> None:
-        text = self.query_one(f"#{self.field}", Input).value
-        self.rows = dates.suggest(text, self.today, field=self.field, due=self.values["due"],
-                                  last=dates.last_used(self.field, self.state))
-        options = self.query_one("#suggestions", OptionList)
-        options.clear_options()
-        if self.rows:
-            options.add_options([Option(self.row(s)) for s in self.rows])
-            options.highlighted = 0
-        else:
-            options.add_option(Option(Content.styled("no date matches", "dim italic"), disabled=True))
-        if text.strip():
-            self.values[self.field] = self.rows[0].day if self.rows else self.values[self.field]
-        else:
-            self.values[self.field] = None
-        self.draw_labels()
-
-    def row(self, s: dates.Suggestion) -> Content:
-        right = dates.fmt(s.day) if s.day else ""
-        return Content(f"{s.label:<{self.WIDTH - len(right)}}{right}")
-
-    def draw_labels(self) -> None:
-        for field in ("due", "start"):
-            value = self.values[field]
-            here = "▸ " if field == self.field else "  "
-            self.query_one(f"#{field}-label", Static).update(Content.assemble(
-                (f"{here}{field.title():<6}", "bold" if field == self.field else "dim"),
-                ((dates.fmt(value) if value else "no date").ljust(13), COUNT_COLOUR if value else "dim")))
-
-    @on(Input.Changed)
-    def typed(self, event: Input.Changed) -> None:
-        if event.input.id == self.field:
-            self.refresh_rows()
-
-    def action_move(self, step: int) -> None:
-        options = self.query_one("#suggestions", OptionList)
-        options.action_cursor_down() if step > 0 else options.action_cursor_up()
-        if options.highlighted is not None and options.highlighted < len(self.rows):
-            self.values[self.field] = self.rows[options.highlighted].day
-            self.draw_labels()
-
-    def action_switch(self) -> None:
-        self.field = "start" if self.field == "due" else "due"
-        self.query_one(f"#{self.field}", Input).focus()
-        self.refresh_rows() if self.query_one(f"#{self.field}", Input).value.strip() else self.show_rows()
-
-    def show_rows(self) -> None:
-        """Suggestions for an untouched field, keeping its current value."""
-        keep = self.values[self.field]
-        self.refresh_rows()
-        self.values[self.field] = keep
-        self.draw_labels()
-
-    def take(self) -> None:
-        options = self.query_one("#suggestions", OptionList)
-        if options.highlighted is not None and options.highlighted < len(self.rows):
-            self.values[self.field] = self.rows[options.highlighted].day
-        elif self.rows == [] and self.query_one(f"#{self.field}", Input).value.strip():
-            return self.notify("No date matches that; try 3 days, fri or dec 5.", severity="warning")
-        if self.field == "due" and self.values["due"] is not None:
-            self.field = "start"
-            self.query_one("#start", Input).focus()
-            return self.show_rows()
-        self.finish()
-
-    def finish(self) -> None:
-        for field, value in self.values.items():
-            if value:
-                dates.remember(field, value, self.state)
-        self.dismiss((self.values["due"], self.values["start"]))
-
-    @on(Input.Submitted)
-    def entered(self, event: Input.Submitted) -> None:
-        event.stop()
-        self.take()
-
-    @on(OptionList.OptionSelected)
-    def clicked(self, event: OptionList.OptionSelected) -> None:
-        self.take()
-
-    def action_back(self) -> None:
-        self.dismiss("back")
 
 
 class TextScreen(ModalScreen[str | None]):
@@ -545,10 +403,11 @@ class GTDApp(App):
     #keys { height: 1; padding: 0 1; color: $text-muted; }
     AskScreen, TextScreen, CaptureScreen, HelpScreen, ContextScreen, DateScreen { align: center middle; }
     .stepbar { margin-bottom: 1; }
-    DateScreen #suggestions { height: auto; max-height: 7; margin-top: 1; }
-    DateScreen .datefield { height: 1; }
-    DateScreen .datefield Static { width: 23; }
-    DateScreen .datefield Input { border: none; height: 1; padding: 0 1; background: $boost; width: 1fr; }
+    DatePicker { height: auto; }
+    DatePicker #suggestions { height: auto; max-height: 7; margin-top: 1; }
+    DatePicker .datefield { height: 1; }
+    DatePicker .datefield Static { width: 23; }
+    DatePicker .datefield Input { border: none; height: 1; padding: 0 1; background: $boost; width: 1fr; }
     HelpScreen .dialog { max-height: 95%; }
     HelpScreen VerticalScroll { height: auto; max-height: 100%; }
     .dialog { width: 72; height: auto; max-height: 80%; border: thick $primary; background: $surface; padding: 1 2; }
@@ -570,13 +429,16 @@ class GTDApp(App):
         Binding("x", "toggle_mark", "Mark", show=False),
         Binding("o", "open_link", "Open link", show=False),
         Binding("s", "toggle_later", "Show/hide later", show=False),
-        Binding("t", "dates", "Dates", show=False),
+        Binding("v", "cycle_view", "Vault view", show=False),
         Binding("backspace", "delete", "Delete", show=False),
         Binding("delete", "delete", "Delete", show=False),
         Binding("question_mark", "help", "Keys", show=False),
         Binding("z", "undo", "Undo"),
         Binding("e", "edit", "Edit"),
-        Binding("m", "move", "Move"),
+        Binding("m", "edit_field('project')", "Project", show=False),
+        Binding("l", "edit_field('context')", "Context", show=False),
+        Binding("d", "edit_field('dates')", "Dates", show=False),
+        Binding("p", "edit_field('who')", "Waiting for", show=False),
         Binding("q", "quit", "Quit"),
     ]
     WATCH_SECONDS = 1.0  # how often to check gtd.md for edits made outside the app
@@ -929,12 +791,15 @@ class GTDApp(App):
             ("Weekly review", "w", "review"),
             ("Next weekly review step", "n", "review_next"),
             ("Edit highlighted item", "e", "edit"),
-            ("Move highlighted item", "m", "move"),
+            ("Set project of highlighted item", "m", "edit_field('project')"),
+            ("Set context of highlighted item", "l", "edit_field('context')"),
+            ("Set dates of highlighted item", "d", "edit_field('dates')"),
+            ("Waiting for someone on highlighted item", "p", "edit_field('who')"),
+            ("Re-clarify highlighted item (change anything, move lists)", "c", "clarify"),
             ("Delete marked or highlighted item", "⌫", "delete"),
             ("Mark or unmark highlighted item", "x", "toggle_mark"),
             ("Open a link in highlighted item", "o", "open_link"),
             ("Show or hide tasks that start later", "s", "toggle_later"),
-            ("Set due and start dates of highlighted item", "t", "dates"),
             ("Show every key", "?", "help"),
             ("Show one context in Next Actions", "f", "engage"),
             *((f"Go to {sec.value}", "tab / ⇧tab", f"go({n})") for n, sec in enumerate(LIST_ORDER)),
@@ -954,6 +819,15 @@ class GTDApp(App):
         entries += [(f"Captures go to {name}", "", f"capture_to('{name}')") for name in self.areas
                     if name != self.capture_area]
         return entries
+
+    async def action_cycle_view(self) -> None:
+        """v: both vaults → the first → the second → both again."""
+        names = list(self.areas)
+        if len(names) < 2:
+            return
+        order = [names] + [[n] for n in names]
+        now = next((i for i, view in enumerate(order) if view == self.view_areas), 0)
+        await self.action_show_area("" if (nxt := order[(now + 1) % len(order)]) == names else nxt[0])
 
     async def action_show_area(self, name: str) -> None:
         self.view_areas = [name] if name else list(self.areas)
@@ -1030,15 +904,15 @@ class GTDApp(App):
 
     @work(exclusive=True)
     async def action_clarify(self) -> None:
-        """Clarify the highlighted thing. On a project: ask for its next action. On a
-        Someday item: run it through clarify. Otherwise: clarify In, starting from
-        the highlighted In item if there is one, then the rest from the top."""
+        """c. On In: clarify from the highlighted item, then the rest of In. On a project:
+        capture tasks into it. Anywhere else: re-clarify the highlighted item, every row
+        prefilled, so any answer can change (this is also how an item moves between lists)."""
         here, item = self.current, self.selected()
         if here is Section.PROJECTS and item is not None:
-            await self.clarify(item, None, "action", existing=item.project)
+            await self.clarify(item, None, "tasks", existing=item.project, locked_project=True, kind="addto")
             return await self.show(here)
-        if here is Section.SOMEDAY and item is not None:
-            await self.clarify(item, Section.SOMEDAY)
+        if here is not Section.IN and item is not None:
+            await self.clarify(item, here, "what", **prefill_from_item(item, here))
             return await self.show(here)
         first = item if here is Section.IN else None
         await self.show(Section.IN)
@@ -1061,133 +935,27 @@ class GTDApp(App):
         self.clarify_progress = None
         return True
 
+    def card(self, item: model.Item, **kw) -> ClarifyScreen:
+        """The clarify card for an item, set up for its vault."""
+        projects = [(self.title_of(item.area, p.project), p.project) for p in self.area_projects(item.area)]
+        return ClarifyScreen(item, projects=projects, contexts=self.context_choices(), today=self.today,
+                             progress=self.clarify_progress, area=item.area if len(self.areas) > 1 else None,
+                             area_colour=AREA_COLOURS.get(item.area, ""),
+                             source=source_name(item.src) if item.src else None, date_state=self.DATE_STATE, **kw)
+
+    def title_of(self, area: str | None, slug: str) -> str:
+        return self.project_title(model.Item(text="", project=slug, area=area))
+
     async def clarify(self, item: model.Item, source: Section | None = Section.IN,
                       start: str = "what", **preset) -> bool:
-        """Walk one item through the processing diagram, one screen per decision.
-
-        0 / ← / Esc goes back a screen with the earlier answer kept; nothing is
-        written until the last screen. Returns False when Arjun backs out of
-        the first screen. `preset` pre-answers steps, e.g. existing=<slug>.
-        """
-        a = dict(preset)
-        title = f"“{item.text}”\n\n"
-
-        async def what():
-            # Allen's two questions in one screen: actionable? and if so, one step or a project?
-            r = await self.ask(title + "What is it?",
-                               ["One action", "A project (more than one step)", "Someday/Maybe (incubate)",
-                                "Trash", "Reference: file it in Obsidian"])
-            if r is not None:
-                a["choice"] = r
-                a["actionable"] = r <= 2
-                a["kind"] = "project" if r == 2 else "single"
-                a["dest"] = Section.SOMEDAY if r == 3 else None  # trash and reference both clear it from In
-                return ["action", "outcome", "commit", "commit", "commit"][r - 1]
-
-        async def outcome():
-            r = await self.text("Project: what does done look like?", a.get("outcome", item.text))
-            if r is not None:
-                a["outcome"] = r
-                return "action" if r else "outcome"
-
-        async def action():
-            fresh = a.get("kind") == "project" or a.get("existing")
-            r = await self.text("What is the next physical, visible action?",
-                                a.get("action", "" if fresh else item.text))
-            if r is not None:
-                a["action"] = r
-                if not r:
-                    return "action"
-                return "project" if a.get("kind") == "single" and self.area_projects(item.area) else "how"
-
-        async def project():
-            projects = self.area_projects(item.area)
-            r = await self.ask(f"Next action: “{a['action']}”\n\nWhich project?",
-                               ["No project"] + [p.text for p in projects])
-            if r is not None:
-                a["existing"] = None if r == 1 else projects[r - 2].project
-                return "how"
-
-        async def how():
-            r = await self.ask(f"Next action: “{a['action']}”",
-                               ["Defer it (Next Actions)", "Do it now (under two minutes)",
-                                "Delegate it (Waiting For)"])
-            if r is not None:
-                a["how"] = ["defer", "now", "delegate"][r - 1]
-                return ["context", "commit", "who"][r - 1]
-
-        async def context():
-            choices = self.context_choices()
-            r = await self.push_screen_wait(ContextScreen(f"Defer “{a['action']}”: which context?", choices,
-                                                          (a.get("context") or "").split(), self.header))
-            if r is not None:
-                if r == ["other"]:
-                    return "context_other"
-                a["context"] = " ".join(r)
-                return "dates"
-
-        async def context_other():
-            r = await self.text("Context name", (a.get("context") or "").lstrip("@"))
-            if r is not None:
-                a["context"] = f"@{r.lstrip('@').replace(' ', '-')}" if r else None
-                return "dates" if r else "context_other"
-
-        async def who():
-            r = await self.text("Waiting for whom?", a.get("who", ""))
-            if r is not None:
-                a["who"] = r
-                return "dates" if r else "who"
-
-        async def dates_step():
-            what_for = "back from them" if a.get("how") == "delegate" else "done"
-            r = await self.push_screen_wait(DateScreen(
-                self.today, a.get("due"), a.get("start"), self.header,
-                f"“{a['action']}”: when is it due ({what_for}), and when should it show up? Enter skips.",
-                self.DATE_STATE))
-            if r == "back":
-                return None
-            a["due"], a["start"] = r
-            return "commit"
-
-        steps = {f.__name__: f for f in (what, outcome, action, project, how, context, context_other, who)}
-        steps["dates"] = dates_step
-        has_projects = bool(self.area_projects(item.area))
-        history, step = [], start
-        while step != "commit":
-            path = predict_path(a, start, has_projects)
-            self.header = Content.assemble(step_bar(path, step, self.clarify_progress), "\n",
-                                           (self.clarify_answers(a), "dim italic"))
-            nxt = await steps[step]()
-            if nxt is None:
-                if not history:
-                    self.header = None
-                    return False
-                step = history.pop()
-            elif nxt != step:
-                history.append(step)
-                step = nxt
-        self.header = None
+        """Run the clarify card for one item and apply the answers. False if Arjun backed out."""
+        a = await self.push_screen_wait(self.card(item, start=start, preset=preset))
+        if a is None:
+            return False
         locate = self.on_disk(source, item) if source else (lambda d: None)
         await self.change(lambda d: self.apply_clarify(d, a, locate(d)), item.area)
         self.toast(self.clarify_summary(item, a))
         return True
-
-    def clarify_answers(self, a: dict) -> str:
-        """The answers so far, in one line under the step bar."""
-        parts = [CHOICES[a["choice"]]] if a.get("choice") else []
-        if a.get("outcome") and a.get("kind") == "project":
-            parts.append(f"project “{a['outcome']}”")
-        if a.get("action"):
-            parts.append(f"“{a['action']}”")
-        if a.get("existing"):
-            parts.append(a["existing"].replace("-", " ").title())
-        if a.get("how"):
-            parts.append({"defer": "defer", "now": "do it now", "delegate": "delegate"}[a["how"]])
-        if a.get("context"):
-            parts.append(a["context"])
-        if a.get("who"):
-            parts.append(f"waiting for {a['who']}")
-        return " · ".join(parts)
 
     @staticmethod
     def clarify_summary(item: model.Item, a: dict) -> str:
@@ -1195,11 +963,13 @@ class GTDApp(App):
             return {3: f"Moved “{item.text}” to Someday/Maybe", 4: f"Trashed “{item.text}”"}.get(
                 a.get("choice"), f"Cleared “{item.text}” from In (file it in Obsidian)")
         action = a["action"]
-        return {"defer": f"Deferred “{action}” to {a.get('context')}",
-                "now": f"Done now: “{action}”",
-                "delegate": f"Delegated “{action}” to {a.get('who')}"}[a["how"]]
+        extra = f" (+{len(a['extra_tasks'])} more in the project)" if a.get("extra_tasks") else ""
+        return {"defer": f"Deferred “{action}” to {a.get('context') or 'no context'}{extra}",
+                "now": f"Done now: “{action}”{extra}",
+                "delegate": f"Delegated “{action}” to {a.get('who')}{extra}"}[a["how"]]
 
     def apply_clarify(self, d: model.Doc, a: dict, src: model.Item | None) -> None:
+        keep_every = src.every if src is not None else None
         if a.get("actionable") is False:
             if a["dest"] is None:
                 model.trash(d, src)
@@ -1207,14 +977,59 @@ class GTDApp(App):
                 model.move(d, src, a["dest"])
             return
         slug = a.get("existing")
+        if a.get("new_project"):
+            slug = model.make_project(d, None, a["new_project"], self.today)
         if a.get("kind") == "project" and not slug:
             slug, src = model.make_project(d, src, a["outcome"], self.today), None
+        made = None
         if a["how"] == "defer":
-            model.defer(d, src, a["action"], a["context"], slug, self.today, a.get("due"), a.get("start"))
+            made = model.defer(d, src, a["action"], a.get("context"), slug, self.today, a.get("due"), a.get("start"))
         elif a["how"] == "now":
             model.do_now(d, src, a["action"], slug, self.today)
         else:
-            model.delegate(d, src, a["action"], a["who"], slug, self.today, a.get("due"), a.get("start"))
+            made = model.delegate(d, src, a["action"], a["who"], slug, self.today, a.get("due"), a.get("start"))
+        if made is not None and keep_every:
+            made.every = keep_every  # re-clarifying a recurring item keeps it recurring
+        for task in a.get("extra_tasks") or []:  # further tasks captured into the project
+            model.defer(d, None, task, None, slug, self.today)
+
+    # One row of the card on an already-clarified item: m project, l context, d dates, p waiting for
+
+    @work(exclusive=True)
+    async def action_edit_field(self, field: str) -> None:
+        if not (item := self.selected()) or item.raw is not None:
+            return
+        section = self.current
+        a = await self.push_screen_wait(self.card(item, fields=[field], preset=prefill_from_item(item, section)))
+        if a is None:
+            return
+        locate = self.on_disk(section, item)
+
+        def apply(d):
+            if (it := locate(d)) is None:
+                return
+            if field == "project":
+                it.project = (model.make_project(d, None, a["new_project"], self.today) if a.get("new_project")
+                              else a.get("existing"))
+            elif field == "context":
+                it.context = a.get("context")
+            elif field == "dates":
+                it.due, it.start = a.get("due"), a.get("start")
+            elif field == "who":
+                it.waiting, it.since = a["who"].strip().lower(), it.since or self.today
+                if section is not Section.WAITING:
+                    model.move(d, it, Section.WAITING)
+        await self.change(apply, item.area)
+        said = {"project": lambda: f"project {a.get('new_project') or self.title_of(item.area, a['existing'])}"
+                if a.get("existing") or a.get("new_project") else "no project",
+                "context": lambda: a.get("context") or "no context",
+                "dates": lambda: " · ".join(x for x in (
+                    a.get("due") and f"due {a['due']:%b %-d}",
+                    a.get("start") and f"starts {a['start']:%b %-d}" + (
+                        " (hidden until then)" if a["start"] > self.today and not self.show_later else ""))
+                    if x) or "no dates",
+                "who": lambda: f"waiting for {a['who']}"}[field]()
+        self.toast(f"{model.split_trailing_links(item.text)[0][:40]}: {said}")
 
     # 3. Organize: act on the highlighted item
 
@@ -1460,40 +1275,6 @@ class GTDApp(App):
                 items[next(i for i, x in enumerate(items) if x is old)] = new
         await self.change(replace, item.area)
         self.toast(f"Edited “{new.text}”")
-
-    @work(exclusive=True)
-    async def action_dates(self) -> None:
-        """t: due and start dates on the date screen (the same one clarify uses)."""
-        if not (item := self.selected()):
-            return
-        r = await self.push_screen_wait(DateScreen(self.today, item.due, item.start,
-                                                   title=f"“{item.text[:60]}”: due, then start",
-                                                   state=self.DATE_STATE))
-        if r == "back":
-            return
-        due, start = r
-        locate = self.on_disk(self.current, item)
-
-        def set_dates(d):
-            if (it := locate(d)) is not None:
-                it.due, it.start = due, start
-        await self.change(set_dates, item.area)
-        later = start and start > self.today and not self.show_later
-        said = [f"due {due:%b %-d}" if due else "no due date",
-                (f"starts {start:%b %-d}" + (" (hidden until then)" if later else "")) if start else "no start"]
-        self.toast(f"{model.split_trailing_links(item.text)[0][:40]}: {' · '.join(said)}")
-
-    @work(exclusive=True)
-    async def action_move(self) -> None:
-        if not (item := self.selected()):
-            return
-        locate = self.on_disk(self.current, item)
-        targets = [s for s in LIST_ORDER if s is not self.current]
-        choice = await self.ask(f"Move “{item.text}” to:", [t.value for t in targets])
-        if choice:
-            target = targets[choice - 1]
-            await self.change(lambda d: model.move(d, locate(d), target), item.area)
-            self.toast(f"Moved “{item.text}” to {target.value}")
 
     # 4. Reflect: the weekly review, as a guided tour of the lists
 
