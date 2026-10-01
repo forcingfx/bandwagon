@@ -648,6 +648,9 @@ class GTDApp(App):
     .dialog { width: 72; height: auto; max-height: 80%; border: thick $primary; background: $surface; padding: 1 2; }
     .question { margin-bottom: 1; }
     .hint { margin-top: 1; color: $text-muted; }
+    #card-title { margin-bottom: 1; }
+    #card-item { margin-bottom: 1; }
+    #card-picker { margin-top: 1; height: auto; }
     .dialog OptionList { height: auto; max-height: 14; }
     """
     COMMANDS: set = set()  # the / palette is our own PaletteScreen; no Textual built-ins

@@ -240,7 +240,7 @@ class ClarifyScreen(ModalScreen):
             return "Enter confirm · Esc back"
         return {"tasks": "Tab add another · Enter done · Esc back",
                 "dates": "↑↓ pick · Enter take · Tab due/start · Esc back",
-                "context": "number pick one · Space toggle · Enter confirm · e edit contexts · Esc back"}.get(
+                "context": "1-9 pick · Space toggle · Enter confirm · e edit list · Esc back"}.get(
             self.step, "1-9 pick · j k move · Enter take · Esc back" if self.step in OPTION_STEPS
             else "Enter confirm · Esc back")
 
