@@ -4,15 +4,14 @@ from __future__ import annotations
 import json
 import subprocess
 from datetime import date
-from functools import partial
 import hashlib
 from pathlib import Path
 from urllib.parse import quote
 
 from textual import on, work
 from textual.app import App, ComposeResult
+from textual.fuzzy import Matcher
 from textual.binding import Binding
-from textual.command import CommandPalette, DiscoveryHit, Hit, Hits, Provider
 from textual.content import Content
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
@@ -178,31 +177,128 @@ class ItemList(OptionList, inherit_bindings=False):
                 Binding("shift+tab", "app.step_list(-1)", show=False)]
 
 
-class GTDCommands(Provider):
-    """The / box: search tasks in every list and every command by name, each command
-    showing its direct key. An empty box lists the commands."""
+PALETTE_GROUPS = [  # (heading, the actions it holds, by name before any "(")
+    ("Do", {"capture", "clarify", "complete", "undo", "review", "review_next", "engage", "open_link"}),
+    ("Edit item", {"edit", "edit_field", "delete", "toggle_mark"}),
+    ("Lists & views", {"go", "cycle_view", "show_area", "toggle_later", "clear_ticked", "clear_proposals", "help"}),
+    ("Settings", {"manage_contexts", "capture_to", "prune_now", "toggle_prune", "quit"}),
+]
+PALETTE_WIDTH = 76  # characters in a row: the name on the left, its key or list on the right
+
+
+def task_matches(query: str, item: model.Item) -> bool:
+    """Every word of the query appears in the task's text or tags. Plain substrings, not
+    fuzzy: fuzzy matching is exponential on long task lines and stalls typing."""
+    hay = " ".join(filter(None, [item.text, item.context, item.project and f"+{item.project}",
+                                 item.waiting])).lower()
+    return all(word in hay for word in query.lower().split())
+
+
+def highlight_words(text: str, query: str) -> Content:
+    content, low = Content(text), text.lower()
+    for word in query.lower().split():
+        at = low.find(word)
+        while at >= 0:
+            content = content.stylize("bold underline", at, at + len(word))
+            at = low.find(word, at + len(word))
+    return content
+
+
+class PaletteScreen(ModalScreen):
+    """/ : one box for commands and tasks. Commands come first, each with its key on the
+    right; matching tasks follow, each with its list and vault. An empty box lists every
+    command by group. ↑ ↓ move (j and k type), Enter runs, Esc closes.
+    Dismisses with ("action", name), ("item", (section, line)) or None."""
+
+    BINDINGS = [Binding("escape", "close", "Close"),
+                Binding("up", "move(-1)", show=False, priority=True),
+                Binding("down", "move(1)", show=False, priority=True)]
+    MAX_TASKS = 30
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.items: list = []  # (section, line) per task row, by the row's id
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Input(placeholder="Search tasks and commands…", id="palette-input")
+            yield OptionList(id="palette-results")
+            yield Static("↑ ↓ move · Enter run · Esc close", classes="hint", markup=False)
+
+    def on_mount(self) -> None:
+        self.fill("")
+        self.query_one("#palette-input", Input).focus()
 
     @staticmethod
-    def row(name, key: str) -> Content:
-        """The command, then its direct key dimmed on the same line."""
-        name = name if isinstance(name, Content) else Content(name)
-        return name + Content.styled(f"   {key}", "dim") if key else name
+    def row(left: Content, right: Content) -> Content:
+        room = PALETTE_WIDTH - right.cell_length - 2
+        if left.cell_length > room:
+            left = left.truncate(room - 1) + Content("…")
+        return left + Content(" " * (PALETTE_WIDTH - left.cell_length - right.cell_length)) + right
 
-    async def discover(self) -> Hits:
-        for name, key, action in self.app.palette_entries():
-            yield DiscoveryHit(self.row(name, key), partial(self.app.run_action, action), text=name)
+    def command(self, name: Content, key: str, action: str) -> Option:
+        return Option(self.row(name, Content.styled(key, COUNT_COLOUR)), id=f"action:{action}")
 
-    async def search(self, query: str) -> Hits:
-        matcher = self.matcher(query)
-        for name, key, action in self.app.palette_entries():
-            if (score := matcher.match(name)) > 0:
-                yield Hit(score, self.row(matcher.highlight(name), key), partial(self.app.run_action, action),
-                          text=name)
-        for sec in LIST_ORDER:
-            for item in self.app.doc.items(sec):
-                if item.raw is None and (score := matcher.match(item.text)) > 0:
-                    yield Hit(score, matcher.highlight(item.text) + Content.styled(f"   {sec.value}", "dim"),
-                              partial(self.app.jump_to, sec, item.line()), text=item.text)
+    @staticmethod
+    def heading(text: str, first: bool = False) -> Option:
+        return Option(Content.styled(("" if first else "\n") + text.upper(), "bold dim"), disabled=True)
+
+    def fill(self, query: str) -> None:
+        app, options = self.app, []
+        entries = app.palette_entries()
+        if not query.strip():
+            for heading, names in PALETTE_GROUPS:
+                group = [e for e in entries if e[2].split("(")[0] in names]
+                if group:
+                    options += [self.heading(heading, not options)] + [self.command(Content(n), k, a) for n, k, a in group]
+        else:
+            matcher = Matcher(query)
+            hits = sorted(((matcher.match(n), n, k, a) for n, k, a in entries), key=lambda h: -h[0])
+            commands = [self.command(matcher.highlight(n), k, a) for score, n, k, a in hits if score > 0]
+            found = [(sec, i) for sec in LIST_ORDER for i in app.doc.items(sec)
+                     if i.raw is None and task_matches(query, i)][:self.MAX_TASKS]
+            tasks = [Option(self.row(highlight_words(i.text, query), Content.assemble(
+                        (sec.value.rjust(13), "dim"), " ", ("▌", AREA_COLOURS.get(i.area, "dim")))),
+                        id=f"item:{n}") for n, (sec, i) in enumerate(found)]
+            self.items = [(sec, i.line()) for sec, i in found]
+            if commands:
+                options += [self.heading("Commands", True)] + commands
+            if tasks:
+                options += [self.heading("Tasks", not options)] + tasks
+            if not options:
+                options = [Option(Content.styled("Nothing matches", "dim italic"), disabled=True)]
+        widget = self.query_one("#palette-results", OptionList)
+        widget.clear_options()
+        widget.add_options(options)
+        widget.highlighted = next((n for n, o in enumerate(options) if not o.disabled), None)
+
+    @on(Input.Changed, "#palette-input")
+    def typed(self, event: Input.Changed) -> None:
+        self.fill(event.value)
+
+    def action_move(self, step: int) -> None:
+        widget = self.query_one("#palette-results", OptionList)
+        widget.action_cursor_down() if step > 0 else widget.action_cursor_up()
+
+    def choose(self, option_id: str | None) -> None:
+        if not option_id:
+            return
+        kind, value = option_id.split(":", 1)
+        self.dismiss(("action", value) if kind == "action" else ("item", self.items[int(value)]))
+
+    @on(Input.Submitted, "#palette-input")
+    def submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        widget = self.query_one("#palette-results", OptionList)
+        if widget.highlighted is not None:
+            self.choose(widget.get_option_at_index(widget.highlighted).id)
+
+    @on(OptionList.OptionSelected, "#palette-results")
+    def clicked(self, event: OptionList.OptionSelected) -> None:
+        self.choose(event.option.id)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
 
 
 class HelpScreen(ModalScreen[None]):
@@ -534,7 +630,7 @@ class GTDApp(App):
     #items:focus { border: none; }
     #status { height: 1; background: $boost; padding: 0 1; }
     #keys { height: 1; padding: 0 1; color: $text-muted; }
-    AskScreen, TextScreen, CaptureScreen, HelpScreen, ContextScreen, DateScreen { align: center middle; }
+    AskScreen, TextScreen, CaptureScreen, HelpScreen, ContextScreen, DateScreen, ContextsScreen { align: center middle; }
     .stepbar { margin-bottom: 1; }
     DatePicker { height: auto; }
     DatePicker #suggestions { height: auto; max-height: 7; margin-top: 1; }
@@ -543,12 +639,18 @@ class GTDApp(App):
     DatePicker .datefield Input { border: none; height: 1; padding: 0 1; background: $boost; width: 1fr; }
     HelpScreen .dialog { max-height: 95%; }
     HelpScreen VerticalScroll { height: auto; max-height: 100%; }
+    ContextsScreen .dialog { width: 56; }
+    ContextsScreen #contexts { height: auto; max-height: 20; border: none; }
+    ContextsScreen #contexts-entry { height: auto; }
+    PaletteScreen { align: center top; }
+    PaletteScreen .dialog { width: 84; margin-top: 3; max-height: 85%; }
+    PaletteScreen #palette-results { height: auto; max-height: 30; border: none; margin-top: 1; }
     .dialog { width: 72; height: auto; max-height: 80%; border: thick $primary; background: $surface; padding: 1 2; }
     .question { margin-bottom: 1; }
     .hint { margin-top: 1; color: $text-muted; }
     .dialog OptionList { height: auto; max-height: 14; }
     """
-    COMMANDS = {GTDCommands}  # only our actions: no themes, screenshots or other built-ins
+    COMMANDS: set = set()  # the / palette is our own PaletteScreen; no Textual built-ins
     BINDINGS = [
         Binding("slash", "command_palette", "Palette", show=False),  # replaces Textual's Ctrl+P
         Binding("a", "capture", "Capture"),
@@ -990,7 +1092,6 @@ class GTDApp(App):
                  else "Prune Done: switch to only on demand")
         return [
             ("Capture", "a", "capture"),
-            ("Clarify", "c", "clarify"),
             ("Tick highlighted item", "space", "complete"),
             ("Undo", "z", "undo"),
             ("Weekly review", "w", "review"),
@@ -1000,7 +1101,7 @@ class GTDApp(App):
             ("Set context of highlighted item", "l", "edit_field('context')"),
             ("Set dates of highlighted item", "d", "edit_field('dates')"),
             ("Waiting for someone on highlighted item", "p", "edit_field('who')"),
-            ("Re-clarify highlighted item (change anything, move lists)", "c", "clarify"),
+            ("Clarify In, or re-clarify the highlighted item", "c", "clarify"),
             ("Delete marked or highlighted item", "⌫", "delete"),
             ("Mark or unmark highlighted item", "x", "toggle_mark"),
             ("Open a link in highlighted item", "o", "open_link"),
@@ -1020,7 +1121,8 @@ class GTDApp(App):
     def area_entries(self) -> list[tuple[str, str, str]]:
         if len(self.areas) < 2:
             return []
-        entries = [(f"Show {name} only", "", f"show_area('{name}')") for name in self.areas]
+        entries = [("Switch vault: " + ", ".join(self.areas) + ", both", "v", "cycle_view")]
+        entries += [(f"Show {name} only", "", f"show_area('{name}')") for name in self.areas]
         entries.append(("Show all areas", "", "show_area('')"))
         entries += [(f"Captures go to {name}", "", f"capture_to('{name}')") for name in self.areas
                     if name != self.capture_area]
@@ -1520,8 +1622,17 @@ class GTDApp(App):
         self.push_screen(HelpScreen())
 
     def action_command_palette(self) -> None:
-        if not CommandPalette.is_open(self):
-            self.push_screen(CommandPalette(id="--command-palette", placeholder="Search tasks and commands…"))
+        if not isinstance(self.screen, PaletteScreen):
+            self.push_screen(PaletteScreen(), callback=self.palette_chosen)
+
+    async def palette_chosen(self, choice) -> None:
+        if not choice:
+            return
+        kind, value = choice
+        if kind == "action":
+            await self.run_action(value)
+        else:
+            await self.jump_to(*value)
 
     async def jump_to(self, section: Section, line: str) -> None:
         """Open a list with the given item highlighted (used by / search)."""

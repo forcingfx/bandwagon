@@ -1234,3 +1234,33 @@ def test_e_in_the_context_picker_opens_the_editor(tmp_path):
     app, saved = editor_run(tmp_path, areas, "right", "l", "e", "a", T("deep"), "escape", "4")
     assert saved[-1] == "@deep"
     assert store.load(areas["work"].file).items(Section.NEXT)[0].context == "@deep"
+
+
+def palette_rows(path, *keys):
+    async def go():
+        app = GTDApp(path, today=TODAY)
+        async with app.run_test(size=(100, 40)) as pilot:
+            await pilot.pause()
+            await pilot.press("slash", *keys); await pilot.pause()
+            from textual.widgets import OptionList
+            options = app.screen.query_one(OptionList)
+            return [(o.disabled, o.prompt.plain if hasattr(o.prompt, "plain") else str(o.prompt))
+                    for o in options.options], options.highlighted
+    return asyncio.run(go())
+
+
+def test_palette_separates_commands_and_tasks_with_a_key_column(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text("<!-- gtd v1 -->\n\n## Next Actions\n- [ ] Confirm venue @calls\n")
+    rows, highlighted = palette_rows(path, *"con")
+    headers = [n for n, (disabled, _) in enumerate(rows) if disabled]
+    assert [rows[n][1].strip() for n in headers] == ["COMMANDS", "TASKS"]
+    commands, tasks = rows[headers[0] + 1:headers[1]], rows[headers[1] + 1:]
+    assert any(t.startswith("Set context of highlighted item") and t.rstrip().endswith(" l") for _, t in commands)
+    assert any("Confirm venue" in t and "Next Actions" in t for _, t in tasks)
+    assert highlighted == 1                                             # the cursor skips the header
+
+
+def test_empty_palette_groups_commands(tmp_path):
+    rows, _ = palette_rows(tmp_path / "gtd.md")
+    assert [text.strip() for disabled, text in rows if disabled] == ["DO", "EDIT ITEM", "LISTS & VIEWS", "SETTINGS"]
