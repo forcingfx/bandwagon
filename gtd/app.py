@@ -66,6 +66,7 @@ HELP = [
                                      ("z", "undo the last change")]),
     ("The five steps", [("a", "capture (Tab: save and capture another)"), ("c", "clarify In"),
                         ("w", "weekly review (n next step, Esc stop)"), ("f", "show one context in Next Actions"),
+                        ("L", "contexts: add, rename, delete, reorder"),
                         ("s", "show or hide tasks whose start date is still ahead")]),
     ("Everything else", [("/", "search tasks and commands"), ("?", "this screen"), ("Esc", "clear marks / stop review"),
                          ("q", "quit")]),
@@ -343,6 +344,136 @@ class TextScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class ContextsScreen(ModalScreen):
+    """L: the contexts, in the order clarify offers them, with how many open items use each
+    across every vault. a adds, e renames (in every file and the config), ⌫ deletes (asking
+    first when items use it), J K move. Changes apply at once; Esc closes."""
+
+    BINDINGS = [Binding("escape", "back", "Close"),
+                Binding("j", "cursor(1)", show=False), Binding("k", "cursor(-1)", show=False),
+                Binding("J", "shift(1)", show=False), Binding("K", "shift(-1)", show=False),
+                Binding("a", "add", show=False), Binding("e", "rename", show=False),
+                Binding("backspace", "delete", show=False), Binding("delete", "delete", show=False)]
+    HINT = "a add · e rename · ⌫ delete · J K move · Esc close"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.mode: str | None = None   # "add", "rename" or "confirm" while one is under way
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Static("Contexts", classes="question", markup=False)
+            yield OptionList(id="contexts")
+            yield Vertical(id="contexts-entry")
+            yield Static(self.HINT, classes="hint", markup=False, id="contexts-hint")
+
+    def on_mount(self) -> None:
+        self.draw(0)
+
+    def draw(self, at: int | None = None) -> None:
+        names, counts = self.app.context_choices(), self.app.context_counts()
+        options = self.query_one("#contexts", OptionList)
+        keep = options.highlighted if at is None else at
+        options.clear_options()
+        width = max((len(n) for n in names), default=0) + 4
+        options.add_options([Option(Content.assemble(
+            f"{n:<{width}}", (f"{counts.get(n, 0)} open" if counts.get(n) else "unused", "dim")))
+            for n in names])
+        if names:
+            options.highlighted = min(keep or 0, len(names) - 1)
+        options.focus()
+
+    def current(self) -> str | None:
+        n = self.query_one("#contexts", OptionList).highlighted
+        names = self.app.context_choices()
+        return names[n] if n is not None and n < len(names) else None
+
+    def check_action(self, action: str, parameters: tuple) -> bool | None:
+        return action == "back" or self.mode is None
+
+    def action_cursor(self, step: int) -> None:
+        options = self.query_one("#contexts", OptionList)
+        options.action_cursor_down() if step > 0 else options.action_cursor_up()
+
+    def action_shift(self, step: int) -> None:
+        name, names = self.current(), self.app.context_choices()
+        if name is None or not 0 <= (to := names.index(name) + step) < len(names):
+            return
+        names.remove(name)
+        names.insert(to, name)
+        self.app.save_context_order(names)
+        self.draw(to)
+
+    async def ask_text(self, mode: str, value: str = "") -> None:
+        self.mode = mode
+        entry = self.query_one("#contexts-entry", Vertical)
+        await entry.remove_children()
+        placeholder = "New context, e.g. deep work" if mode == "add" else "New name"
+        await entry.mount(Input(value=value, placeholder=placeholder, id="contexts-input"))
+        self.query_one("#contexts-hint", Static).update("Enter save · Esc cancel")
+        self.query_one("#contexts-input", Input).focus()
+
+    async def action_add(self) -> None:
+        await self.ask_text("add")
+
+    async def action_rename(self) -> None:
+        if name := self.current():
+            await self.ask_text("rename", name.lstrip("@"))
+
+    async def action_delete(self) -> None:
+        if not (name := self.current()):
+            return
+        if not (used := self.app.context_counts().get(name, 0)):
+            await self.app.delete_context(name)
+            return self.draw()
+        self.mode = "confirm"
+        self.query_one("#contexts-hint", Static).update(Content.assemble(
+            (f"{name} is on {used} open item{'s' if used != 1 else ''}. ", "bold"),
+            "1 delete it and remove it from them · Esc keep it"))
+
+    async def on_key(self, event) -> None:
+        if self.mode == "confirm" and event.character == "1":
+            event.stop()
+            name = self.current()
+            await self.finish()
+            await self.app.delete_context(name)
+            self.draw()
+
+    @on(Input.Submitted, "#contexts-input")
+    async def submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        new, mode, old = context_name(event.value), self.mode, self.current()
+        await self.finish()
+        names = self.app.context_choices()
+        if not new or (mode == "rename" and new == old):
+            return
+        if new in names:
+            self.notify(f"{new} already exists.", severity="warning")
+        elif mode == "add":
+            self.app.save_context_order(names + [new])
+            self.draw(len(names))
+        elif old:
+            await self.app.rename_context(old, new)
+            self.draw()
+
+    async def finish(self) -> None:
+        self.mode = None
+        await self.query_one("#contexts-entry", Vertical).remove_children()
+        self.query_one("#contexts-hint", Static).update(self.HINT)
+        self.query_one("#contexts", OptionList).focus()
+
+    async def action_back(self) -> None:
+        if self.mode:
+            return await self.finish()
+        self.dismiss(None)
+
+
+def context_name(text: str) -> str | None:
+    """"deep work" → "@deep-work"."""
+    words = text.strip().lstrip("@").lower().split()
+    return "@" + "-".join(words) if words else None
+
+
 class CaptureInput(Input):
     """Handles Tab inside the input's own key queue, so a fast
     typist's next keystrokes can never overtake the save."""
@@ -441,6 +572,7 @@ class GTDApp(App):
         Binding("l", "edit_field('context')", "Context", show=False),
         Binding("d", "edit_field('dates')", "Dates", show=False),
         Binding("p", "edit_field('who')", "Waiting for", show=False),
+        Binding("L", "manage_contexts", "Contexts", show=False),
         Binding("q", "quit", "Quit"),
     ]
     WATCH_SECONDS = 1.0  # how often to check gtd.md for edits made outside the app
@@ -448,9 +580,11 @@ class GTDApp(App):
     DATE_STATE = dates.STATE  # last-used dates; tests point this elsewhere
 
     def __init__(self, areas: dict[str, config.Area] | Path | str, today: date | None = None,
-                 capture: str | None = None, contexts: list[str] | None = None) -> None:
+                 capture: str | None = None, contexts: list[str] | None = None,
+                 config_path: Path | None = None) -> None:
         super().__init__()
-        self.contexts = contexts or config.DEFAULT_CONTEXTS
+        self.contexts = list(contexts or config.DEFAULT_CONTEXTS)
+        self.config_path = config_path  # where the contexts editor saves; None keeps changes in memory
         self.show_later = False  # tasks whose start: is after today stay hidden until toggled
         self.project_view: tuple[str, str] | None = None  # (area, slug) while a project page is open
         self.header: Content | None = None  # the clarify step bar while clarify runs
@@ -873,6 +1007,7 @@ class GTDApp(App):
             ("Show or hide tasks that start later", "s", "toggle_later"),
             ("Show every key", "?", "help"),
             ("Show one context in Next Actions", "f", "engage"),
+            ("Manage contexts: add, rename, delete, reorder", "L", "manage_contexts"),
             *((f"Go to {sec.value}", "tab / ⇧tab", f"go({n})") for n, sec in enumerate(LIST_ORDER)),
             ("Clear ticked items", "", "clear_ticked"),
             ("Clear proposals from In", "", "clear_proposals"),
@@ -1205,6 +1340,42 @@ class GTDApp(App):
         """The configured contexts in their order, then any others already in use."""
         used = sorted({c for d in self.docs.values() for s in Section for i in d.items(s) for c in i.contexts})
         return self.contexts + [c for c in used if c not in self.contexts]
+
+    def context_counts(self) -> dict[str, int]:
+        """Open items per context, across every vault."""
+        counts: dict[str, int] = {}
+        for doc in self.docs.values():
+            for section in Section:
+                if section is not Section.DONE:
+                    for item in doc.items(section):
+                        for c in item.contexts:
+                            counts[c] = counts.get(c, 0) + 1
+        return counts
+
+    def save_context_order(self, names: list[str]) -> None:
+        self.contexts = list(names)
+        if self.config_path:
+            config.save_contexts(self.contexts, self.config_path)
+
+    async def rename_context(self, old: str, new: str | None) -> None:
+        """Rename (or with None, remove) a context in every vault's file, as one undo step,
+        and in the configured list."""
+        names = self.context_choices()
+        users = [a for a, doc in self.docs.items()
+                 if any(old in i.contexts for s in Section for i in doc.items(s))]
+        if users:
+            await self.change_each({a: (lambda d: model.rename_context(d, old, new)) for a in users})
+        self.save_context_order([new if n == old else n for n in names if new or n != old])
+        if self.context_filter == old:
+            self.context_filter = new
+            await self.render_lists()
+        self.notify(f"Renamed {old} to {new}." if new else f"Deleted {old}.")
+
+    async def delete_context(self, name: str) -> None:
+        await self.rename_context(name, None)
+
+    def action_manage_contexts(self) -> None:
+        self.push_screen(ContextsScreen())
 
     def area_projects(self, area: str | None) -> list[model.Item]:
         doc = self.docs.get(area) if area else None

@@ -307,3 +307,15 @@ def prune_done(doc: Doc, today: date, days: int = DONE_RETENTION_DAYS) -> None:
     cutoff = today - timedelta(days=days)
     doc.sections[Section.DONE.value] = [
         i for i in doc.items(Section.DONE) if i.raw is not None or i.done_on is None or i.done_on >= cutoff]
+
+
+def rename_context(doc: Doc, old: str, new: str | None) -> int:
+    """Rename a context on every item (or remove it, with new=None). Returns how many changed."""
+    changed = 0
+    for section in Section:
+        for item in doc.items(section):
+            if old in item.contexts:
+                names = [new if c == old else c for c in item.contexts if new or c != old]
+                item.context = " ".join(dict.fromkeys(n for n in names if n)) or None
+                changed += 1
+    return changed

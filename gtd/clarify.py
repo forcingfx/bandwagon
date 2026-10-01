@@ -233,7 +233,7 @@ class ClarifyScreen(ModalScreen):
             return "Enter confirm · Esc back"
         return {"tasks": "Tab add another · Enter done · Esc back",
                 "dates": "↑↓ pick · Enter take · Tab due/start · Esc back",
-                "context": "number pick one · Space toggle · Enter confirm · j k move · Esc back"}.get(
+                "context": "number pick one · Space toggle · Enter confirm · e edit contexts · Esc back"}.get(
             self.step, "1-9 pick · j k move · Enter take · Esc back" if self.step in OPTION_STEPS
             else "Enter confirm · Esc back")
 
@@ -425,12 +425,20 @@ class ClarifyScreen(ModalScreen):
             found.first().action_cursor_down() if step > 0 else found.first().action_cursor_up()
 
     async def action_rephrase(self) -> None:
-        """e: back to the Action row to reword a one-action item's action."""
+        """e: back to the Action row to reword a one-action item's action; on the Context
+        row, the contexts editor instead."""
+        if self.step == "context" and not self.sub and hasattr(self.app, "action_manage_contexts"):
+            from .app import ContextsScreen
+            return self.app.push_screen(ContextsScreen(), callback=self.contexts_edited)
         if self.fields or self.a.get("kind") != "single" or "action" not in self.rows():
             return
         if self.step != "action":
             self.history.append(self.step)
         self.step = "action"
+        await self.show_step()
+
+    async def contexts_edited(self, _) -> None:
+        self.contexts = self.app.context_choices()
         await self.show_step()
 
     async def action_back(self) -> None:

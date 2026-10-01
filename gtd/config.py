@@ -61,3 +61,23 @@ def contexts(path: Path = CONFIG) -> list[str]:
 def single(file: Path, name: str = "main") -> dict[str, Area]:
     """One ad-hoc area for --file and tests."""
     return {name: Area(name, Path(file))}
+
+
+def save_contexts(names: list[str], path: Path = CONFIG) -> None:
+    """Write the contexts list back, rewriting only the `contexts = [...]` line (added at the
+    top when missing), so comments and the areas stay as Arjun wrote them."""
+    line = "contexts = [" + ", ".join(f'"{n}"' for n in names) + "]"
+    text = path.read_text() if path.exists() else ""
+    lines = text.splitlines()
+    at = next((n for n, l in enumerate(lines) if l.split("=")[0].strip() == "contexts" and "[" in l), None)
+    if at is None:
+        lines.insert(0, line)
+    else:
+        end = at
+        while "]" not in lines[end].split("#")[0] and end + 1 < len(lines):  # a list spread over lines
+            end += 1
+        lines[at:end + 1] = [line]
+    tmp = path.with_suffix(".tmp")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp.write_text("\n".join(lines) + "\n")
+    tmp.replace(path)

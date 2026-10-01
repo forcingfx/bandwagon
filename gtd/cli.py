@@ -264,4 +264,4 @@ def main(argv: list[str] | None = None, today: date | None = None) -> None:
         print("\n".join(cmd_expire(areas, today, args.days, getattr(args, "area", None))) or "Nothing to expire.")
     else:
         from .app import GTDApp
-        GTDApp(areas, capture=capture, contexts=config.contexts()).run()
+        GTDApp(areas, capture=capture, contexts=config.contexts(), config_path=config.CONFIG).run()

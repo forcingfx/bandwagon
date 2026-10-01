@@ -155,3 +155,12 @@ def test_link_segments_split_text_for_display():
     segs = model.link_segments("Wipe [[a/dishwasher|Dishwasher]] now")
     assert segs == [("Wipe ", None), ("Dishwasher", "a/dishwasher"), (" now", None)]
 
+
+
+def test_rename_context_renames_and_removes():
+    from gtd import store
+    doc = store.parse("<!-- gtd v1 -->\n\n## Next Actions\n- [ ] A @calls @home\n- [ ] B @home\n")
+    assert model.rename_context(doc, "@calls", "@phone") == 1
+    assert [i.context for i in doc.items(Section.NEXT)] == ["@phone @home", "@home"]
+    assert model.rename_context(doc, "@home", None) == 2
+    assert [i.context for i in doc.items(Section.NEXT)] == ["@phone", None]

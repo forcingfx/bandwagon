@@ -1178,3 +1178,59 @@ def test_clicking_the_vault_switch(tmp_path):
             await pilot.click("#tabs", offset=(8, 0)); await pilot.pause()   # " WORK  HOME …": column 8 is HOME
             return app.view_areas
     assert asyncio.run(go()) == ["home"]
+
+
+def editor_run(tmp_path, areas, *keys):
+    cfg = tmp_path / "config.toml"
+    cfg.write_text('contexts = ["@calls", "@computer", "@home"]\n')
+
+    async def go():
+        app = GTDApp(areas, today=TODAY, contexts=["@calls", "@computer", "@home"], config_path=cfg)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            for key in keys:
+                if isinstance(key, tuple):
+                    await pilot.press(*key[1], "enter")
+                else:
+                    await pilot.press(key)
+                await pilot.pause()
+            return app
+    app = asyncio.run(go())
+    from gtd import config as cfgmod
+    return app, cfgmod.contexts(cfg)
+
+
+def ctx_areas(tmp_path):
+    areas = two_areas(tmp_path)
+    areas["work"].file.write_text("<!-- gtd v1 -->\n\n## Next Actions\n- [ ] Call Fred @calls\n")
+    areas["home"].file.write_text("<!-- gtd v1 -->\n\n## Next Actions\n- [ ] Call mum @calls @home\n")
+    return areas
+
+
+def test_contexts_editor_add_reorder(tmp_path):
+    areas = ctx_areas(tmp_path)
+    app, saved = editor_run(tmp_path, areas, "L", "a", T("deep work"), "K")
+    assert saved == ["@calls", "@computer", "@deep-work", "@home"]       # added at the end, then moved up one
+
+
+def test_contexts_editor_rename_updates_both_vaults(tmp_path):
+    areas = ctx_areas(tmp_path)
+    app, saved = editor_run(tmp_path, areas, "L", "e", "ctrl+u", T("phone"))
+    assert saved[0] == "@phone"
+    assert store.load(areas["work"].file).items(Section.NEXT)[0].context == "@phone"
+    assert store.load(areas["home"].file).items(Section.NEXT)[0].contexts == ["@phone", "@home"]
+
+
+def test_contexts_editor_delete_asks_when_in_use(tmp_path):
+    areas = ctx_areas(tmp_path)
+    app, saved = editor_run(tmp_path, areas, "L", "backspace", "1")      # @calls is used: confirm with 1
+    assert "@calls" not in saved
+    assert store.load(areas["work"].file).items(Section.NEXT)[0].context is None
+    assert store.load(areas["home"].file).items(Section.NEXT)[0].contexts == ["@home"]
+
+
+def test_e_in_the_context_picker_opens_the_editor(tmp_path):
+    areas = ctx_areas(tmp_path)
+    app, saved = editor_run(tmp_path, areas, "right", "l", "e", "a", T("deep"), "escape", "4")
+    assert saved[-1] == "@deep"
+    assert store.load(areas["work"].file).items(Section.NEXT)[0].context == "@deep"

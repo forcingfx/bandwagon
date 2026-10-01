@@ -121,3 +121,16 @@ def test_add_takes_quick_date_forms(areas):
     cli.cmd_add(areas, "home", "Renew passport", TODAY, section="next", due="fri", start="-2")
     item = store.load(areas["home"].file).items(Section.NEXT)[-1]
     assert (str(item.due), str(item.start)) == ("2026-10-02", "2026-09-30")   # TODAY is Tue Sep 29
+
+
+def test_save_contexts_rewrites_only_that_line(tmp_path):
+    cfg = tmp_path / "config.toml"
+    cfg.write_text('capture = "work"\ncontexts = ["@calls", "@home"]\n\n[areas.work]\nfile = "w.md"\n')
+    config.save_contexts(["@home", "@deep"], cfg)
+    text = cfg.read_text()
+    assert 'contexts = ["@home", "@deep"]' in text and '[areas.work]' in text and text.count("contexts =") == 1
+    assert config.contexts(cfg) == ["@home", "@deep"]
+    bare = tmp_path / "bare.toml"
+    bare.write_text('[areas.work]\nfile = "w.md"\n')
+    config.save_contexts(["@calls"], bare)
+    assert config.contexts(bare) == ["@calls"] and config.load(bare)[0]["work"].file.name == "w.md"
