@@ -868,11 +868,15 @@ class GTDApp(App):
         # syntax is shown as its label, underlined, and o opens it.
         base = "strike dim" if item.done else "dim" if item.src else ""
         action, _ = model.split_trailing_links(item.text)
-        for text, target in model.link_segments(action):  # a link inside the sentence stays in it
+        chips = self.chips(item)
+        same = next(((label, url) for label, url in chips if label.casefold() == action.strip().casefold()), None)
+        if same:  # a project row titled like its note: the title is the link, with no repeat chip
+            chips.remove(same)
+            parts.append(self.link_part(action, same[1], base) if same[1] else (action, base))
+        for text, target in [] if same else model.link_segments(action):  # a link inside the sentence stays in it
             parts.append(self.link_part(text, self.resolve(item, target), base) if target else (text, base))
         # Every other link comes after the action, as named chips in one fixed order:
         # the note it is about, its project, its people, its source.
-        chips = self.chips(item)
         for n, (label, url) in enumerate(chips):
             parts.append(("  " if n == 0 else " · ", "dim"))
             label = label if len(label) <= CHIP_MAX else label[:CHIP_MAX - 1] + "…"
@@ -888,7 +892,9 @@ class GTDApp(App):
             late = item.due < self.today
             soon = (item.due - self.today).days <= 2
             parts.append((f"  due {item.due:%b %-d}", "bold #f28779" if late else "#ffd580" if soon else "dim"))
-        dates = [t for t in (item.since and f"since:{item.since}", item.added and f"added:{item.added}",
+        listing_projects = self.current is Section.PROJECTS and not self.project_view
+        dates = [t for t in (item.since and f"since:{item.since}",
+                             not listing_projects and item.added and f"added:{item.added}",
                              item.done_on and f"done:{item.done_on}") if t]
         if dates:
             parts.append(("  " + " ".join(dates), "dim"))

@@ -210,12 +210,19 @@ class ClarifyScreen(ModalScreen):
             return list(self.fields)
         return card_rows(self.a, self.start, bool(self.projects))
 
+    ROW_ROOM = 54  # characters a row's value may take before it is cut with …
+
     def draw_rows(self) -> None:
         lines: list = []
         rows = self.rows()
         here = rows.index(self.step) if self.step in rows else len(rows)
         for n, step in enumerate(rows):
             value = row_value(step, self.a, self.titles)
+            if value and step in ("action", "outcome") and value == self.item.text:
+                value = "as written above"                    # never repeat the item on the card
+            room = self.ROW_ROOM - (13 if step == "action" and self.a.get("kind") == "single" else 0)
+            if value and len(value) > room:                   # one line per row
+                value = value[:room - 1].rstrip() + "…"
             if n == here:
                 lines += [("▸ ", "bold"), (f"{ROW_NAMES[step]:<9}", "bold")]
                 lines.append((value or "", "") if value else ("", ""))

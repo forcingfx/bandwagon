@@ -1007,7 +1007,7 @@ def test_card_fills_the_action_and_never_asks_for_it(tmp_path):
     name, step, title, rows = asyncio.run(go())
     assert (name, step) == ("ClarifyScreen", "how")       # straight past Action to How
     assert title.startswith("Clarify · item 1 of 2")
-    assert "✓ Type     One action" in rows and "✓ Action   Renew passport" in rows
+    assert "✓ Type     One action" in rows and "✓ Action   as written above" in rows
 
 
 def test_review_status_shows_the_step_bar(tmp_path):
