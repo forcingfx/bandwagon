@@ -6,8 +6,12 @@ commands, never by hand, so every write goes through the parser and the atomic w
     gtd propose "text" --src URL [--area work]
                                           an automated proposal; capped per day where the
                                           area sets proposal_cap, extras parked in overflow
-    gtd done "title words"                tick the one open item matching (recurring: roll)
-    gtd find "title words"                show matching items, open and done, in every area
+    gtd done "title words"                tick the one open item matching (recurring: roll);
+                                          in a terminal, several matches open a picker
+    gtd find "words"                      show matching items, open and done, in every area
+                                          (every word, any order, in the text or the tags:
+                                          +project, @context, a person); in a terminal, a
+                                          picker over the open ones to tick and star
     gtd list [--area a] [--section s]     every item as JSON, for skills and views
     gtd expire [--days 7]                 drop proposals left in In for 7 days into a log
     gtd sweep                             file checkboxes ticked in Obsidian: one-off items go
@@ -50,10 +54,14 @@ def all_items(areas: dict[str, config.Area], area: str | None = None):
                     yield name, section, item
 
 
+def is_open(section: Section, item: model.Item) -> bool:
+    return not (item.done or section is Section.DONE)
+
+
 def matches(areas, words: str, open_only: bool = False):
-    needle = words.lower()
+    """Every word appears in the text or tags, in any order, as in the app's / palette."""
     return [(a, s, i) for a, s, i in all_items(areas)
-            if needle in i.text.lower() and not (open_only and (i.done or s is Section.DONE))]
+            if model.task_matches(words, i) and not (open_only and not is_open(s, i))]
 
 
 def keep_recent_lines(path: Path, today: date, days: int, header: list[str]) -> list[str]:
@@ -124,12 +132,23 @@ def cmd_propose(areas, area: str, text: str, src: str, today: date, **tags) -> s
     return f"Proposed to {area} In: {item.text}"
 
 
-def cmd_done(areas, words: str, today: date) -> str:
+def interactive() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def cmd_done(areas, words: str, today: date, picker=None) -> str:
+    """Ticks the one open item matching. On several, `picker(words)` opens on them when
+    given (a terminal); on none, or with no picker (scripts), it refuses with the listing."""
     found = matches(areas, words, open_only=True)
     if len(found) != 1:
-        listing = "\n".join(f"  {a} · {s.value} · {i.text}" for a, s, i in found)
-        raise SystemExit(f"{len(found)} open items match {words!r}; need exactly one.\n{listing}".rstrip())
-    area, section, item = found[0]
+        if picker is None or not found:
+            listing = "\n".join(f"  {a} · {s.value} · {i.text}" for a, s, i in found)
+            raise SystemExit(f"{len(found)} open items match {words!r}; need exactly one.\n{listing}".rstrip())
+        return "\n".join(picker(words)) or "Nothing changed."
+    return tick_item(areas, *found[0], today)
+
+
+def tick_item(areas, area: str, section: Section, item: model.Item, today: date) -> str:
     line = item.line()
     rolled: list = []
 
@@ -142,6 +161,17 @@ def cmd_done(areas, words: str, today: date) -> str:
     if rolled:
         return f"Ticked in {area}: {item.text} (next due {rolled[0][0]})"
     return f"Ticked in {area}: {item.text}"
+
+
+def star_item(areas, area: str, section: Section, item: model.Item, today: date) -> str:
+    """Star for Focus, or unstar a starred item, as s does in the app."""
+    star, line = None if item.star else today, item.line()
+    store.mutate(areas[area].file, lambda d: setattr(model.find(d, section, line), "star", star), today)
+    return f"{'Starred' if star else 'Unstarred'} in {area}: {item.text}"
+
+
+def open_rows(areas) -> list:
+    return [(a, s, i) for a, s, i in all_items(areas) if is_open(s, i)]
 
 
 def log_completions(spec: config.Area, today: date, rows: list[tuple[str, object, str]]) -> None:
@@ -219,10 +249,10 @@ def main(argv: list[str] | None = None, today: date | None = None) -> None:
     p.add_argument("--src", required=True)
     p.add_argument("--area")
     tag_flags(p)
-    p = sub.add_parser("done", help="tick the one open item matching")
+    p = sub.add_parser("done", help="tick the one open item matching; a picker in a terminal when several")
     p.add_argument("words", nargs="+")
-    p = sub.add_parser("find", help="show matching items")
-    p.add_argument("words", nargs="+")
+    p = sub.add_parser("find", help="show matching items; in a terminal, a picker to work through them")
+    p.add_argument("words", nargs="*")
     p = sub.add_parser("list", help="every item as JSON")
     p.add_argument("--area")
     p.add_argument("--section", choices=sorted(SECTIONS))
@@ -248,7 +278,14 @@ def main(argv: list[str] | None = None, today: date | None = None) -> None:
     elif args.command == "propose":
         print(cmd_propose(areas, area, " ".join(args.text), args.src, today, **tags))
     elif args.command == "done":
-        print(cmd_done(areas, " ".join(args.words), today))
+        picker = None
+        if interactive():
+            from .pick import pick
+            picker = lambda words: pick(areas, words, today)  # noqa: E731
+        print(cmd_done(areas, " ".join(args.words), today, picker))
+    elif args.command == "find" and interactive():
+        from .pick import pick
+        print("\n".join(pick(areas, " ".join(args.words), today)) or "Nothing changed.")
     elif args.command == "find":
         found = matches(areas, " ".join(args.words))
         for a, s, i in found:

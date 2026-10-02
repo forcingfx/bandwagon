@@ -193,7 +193,7 @@ def test_up_down_pick_options_in_the_card(tmp_path):
 def test_rows_show_heavy_checkboxes(tmp_path):
     app = GTDApp(tmp_path / "gtd.md", today=TODAY)
     open_row = app.describe(store.parse_item("- [ ] Call Fred @calls +offsite"), set())
-    assert open_row.plain == " [ ]  Call Fred  Offsite  @calls"  # mark bar, action, project chip (slug in words), context
+    assert open_row.plain == " [ ]  Offsite  Call Fred  @calls"  # mark bar, project (slug in words), action, context
     app.current = Section.DONE
     done_row = app.describe(store.parse_item("- [x] Book room done:2026-09-28"), set())
     assert done_row.plain.startswith(" [✔]  Book room")
@@ -808,6 +808,16 @@ def test_context_picker_number_picks_one_space_toggles_several(tmp_path):
     assert store.load(path).items(Section.NEXT)[0].contexts == ["@calls", "@computer"]
 
 
+def test_context_picker_searches_as_you_type_and_adds_a_new_one(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text(TWO_IN)
+    run(path, "c", "1", "1", *"err", "enter", "enter")          # the only match: @errands; no dates
+    assert store.load(path).items(Section.NEXT)[0].context == "@errands"
+    path.write_text(TWO_IN)
+    run(path, "c", "1", "1", "space", *"gar", "enter", "enter")  # tick @calls, then no match: New context; no dates
+    assert store.load(path).items(Section.NEXT)[0].contexts == ["@calls", "@gar"]
+
+
 def test_configured_contexts_come_first_then_ones_in_use(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(TWO_IN + "\n## Next Actions\n- [ ] Old @garden\n")
@@ -870,8 +880,47 @@ def test_tasks_starting_later_are_hidden_until_toggled(tmp_path):
     assert "1 starting later" in app.status_text
     assert " Next 2 " in app.tabs_text().plain
     app = run(path, "tab", "d")
-    assert [i.text for i in app.shown] == ["Clean the drum", "Water plants", "No start at all"]
-    assert "starts Oct 2" in app.describe(app.shown[0], set()).plain
+    assert [i.text for i in app.shown] == ["Water plants", "No start at all", "Clean the drum"]  # recurring last
+    assert "starts Oct 2" in app.describe(app.shown[2], set()).plain
+
+
+def test_next_actions_put_recurring_tasks_in_their_own_block(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text("<!-- gtd v1 -->\n\n## Next Actions\n- [ ] Clean the drum every:monthly\n"
+                    "- [ ] Call Fred @calls +offsite\n- [ ] Water plants every:weekly\n- [ ] Book flights\n")
+    app = run(path, "tab")
+    assert [(k, v if k == "divider" else v[0][1] if k == "project" else v.text) for k, v in app.rows] == [
+        ("item", "Book flights"), ("project", "offsite"), ("item", "Call Fred"), ("divider", "recurring · 2"),
+        ("item", "Clean the drum"), ("item", "Water plants")]
+    assert app.describe(app.shown[1], set()).plain == " [ ]  Call Fred  @calls"  # the header names the project
+    app.current = Section.WAITING  # elsewhere the project leads the row and contexts close it
+    row = app.describe(app.shown[1], set()).plain
+    assert row.index("Offsite") < row.index("Call Fred") < row.index("@calls") and row.endswith("@calls")
+
+
+def test_a_project_shows_five_tasks_then_show_more_and_show_less(tmp_path):
+    path = tmp_path / "gtd.md"
+    tasks = "".join(f"- [ ] Step {n} +move\n" for n in range(1, 8))
+    path.write_text("<!-- gtd v1 -->\n\n## Next Actions\n- [ ] Loose task\n" + tasks + "- [ ] Pack +trip\n")
+
+    def at(*keys):
+        """(the rows, the highlighted row) after the keys: a task by its text, others by kind."""
+        async def go():
+            app = GTDApp(path, today=TODAY)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                for key in ("tab", *keys):
+                    await pilot.press(key)
+                    await pilot.pause()
+                name = lambda r: r[1].text if r[0] == "item" else f"more {r[1][1]}" if r[0] == "more" else r[0]  # noqa: E731
+                return [name(r) for r in app.rows], name(app.highlighted_row())
+        return asyncio.run(go())
+    folded = ["Loose task", "project", *(f"Step {n}" for n in range(1, 6)), "more 2", "project", "Pack"]
+    assert at() == (folded, "Loose task")
+    assert at(*"j" * 6)[1] == "more 2"  # headers are skipped; the fold row is a stop
+    rows, here = at(*"j" * 6, "enter")  # expand: all seven, a show-less row, the cursor on Step 6
+    assert rows[2:11] == [*(f"Step {n}" for n in range(1, 8)), "more 0", "project"] and here == "Step 6"
+    assert at(*"j" * 6, "enter", "j", "j", "enter") == (folded, "more 2")  # show less folds it back
 
 
 def test_links_move_to_the_end_of_the_text():
@@ -898,14 +947,16 @@ def chip_vault(tmp_path):
     return path
 
 
-def test_row_is_action_then_named_chips_in_a_fixed_order(tmp_path):
+def test_row_is_project_action_chips_then_contexts(tmp_path):
     path = chip_vault(tmp_path)
     app = GTDApp(path, today=TODAY)
     app.current = Section.NEXT
     wipe, deck = app.docs["main"].items(Section.NEXT)
-    assert app.describe(wipe, set()).plain == " [ ]  Wipe the seal  Dishwasher  @home every:weekly"
+    assert app.describe(wipe, set()).plain == " [ ]  Wipe the seal  Dishwasher  every:weekly  @home"
+    assert app.describe(deck, set()).plain == " [ ]  Draft the deck  Mike · granola  added:2026-09-29  @agenda-mike"
+    app.current = Section.WAITING
     assert app.describe(deck, set()).plain == \
-        " [ ]  Draft the deck  Payments Performance & GTM · Mike · granola  @agenda-mike  added:2026-09-29"
+        " [ ]  Payments Performance & GTM  Draft the deck  Mike · granola  added:2026-09-29  @agenda-mike"
     assert [label for label, _ in app.item_links(deck)] == ["Payments Performance & GTM", "Mike", "granola"]
 
 
@@ -1105,6 +1156,20 @@ def test_m_sets_the_project_and_can_create_one(tmp_path):
     assert next_item(path).project == "offsite" and [p.text for p in doc.items(Section.PROJECTS)][-1] == "Offsite"
 
 
+def test_m_searches_projects_as_you_type(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text(FIELD_FILE)
+    run(path, "right", "m", *"relau", "enter")          # the only match is highlighted
+    assert next_item(path).project == "maps"
+    path.write_text(FIELD_FILE)
+    run(path, "right", "m", *"garden", "enter")         # nothing matches: the row left is New project: garden
+    doc = store.load(path)
+    assert next_item(path).project == "garden" and [p.text for p in doc.items(Section.PROJECTS)][-1] == "garden"
+    path.write_text(FIELD_FILE)
+    run(path, "right", "m", *"q4", "enter")             # digits type once the box has text
+    assert next_item(path).project == "q4"
+
+
 def test_l_sets_contexts_and_p_moves_to_waiting(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(FIELD_FILE)
@@ -1229,9 +1294,9 @@ def test_contexts_editor_delete_asks_when_in_use(tmp_path):
     assert store.load(areas["home"].file).items(Section.NEXT)[0].contexts == ["@home"]
 
 
-def test_e_in_the_context_picker_opens_the_editor(tmp_path):
-    areas = ctx_areas(tmp_path)
-    app, saved = editor_run(tmp_path, areas, "right", "l", "e", "a", T("deep"), "escape", "4")
+def test_edit_the_list_row_in_the_context_picker_opens_the_editor(tmp_path):
+    areas = ctx_areas(tmp_path)  # three contexts, then 4 Other…, 5 Edit the list…
+    app, saved = editor_run(tmp_path, areas, "right", "l", "5", "a", T("deep"), "escape", "4")
     assert saved[-1] == "@deep"
     assert store.load(areas["work"].file).items(Section.NEXT)[0].context == "@deep"
 

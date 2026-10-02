@@ -135,6 +135,25 @@ def row_value(step: str, a: dict, project_titles: dict[str, str]) -> str | None:
 
 # The card
 
+class RowSearch(Input):
+    """The Project and Context rows' search box. While it is empty a digit picks by number,
+    like the other rows; once something is typed, digits type."""
+
+    async def _on_key(self, event) -> None:
+        if event.key == "space" and self.screen.step == "context":  # context names have no spaces
+            event.stop()
+            event.prevent_default()
+            self.screen.action_toggle()
+        elif not self.value and event.character and event.character.isdigit():
+            event.stop()
+            event.prevent_default()
+            # queued on the card: picking redraws the card and removes this box, which must
+            # not happen while the box is still handling the key
+            self.screen.call_later(self.screen.pick_number, int(event.character))
+        else:
+            await super()._on_key(event)
+
+
 class TaskInput(Input):
     """The Tasks row's input: Tab saves the task and clears for another, inside the
     input's own key queue so fast typing never overtakes the save."""
@@ -154,7 +173,9 @@ class ClarifyScreen(ModalScreen):
     BINDINGS = [Binding("escape", "back", "Back"),
                 Binding("j", "cursor(1)", show=False), Binding("k", "cursor(-1)", show=False),
                 Binding("e", "rephrase", "Rephrase", show=False),
-                Binding("space", "toggle", "Toggle", show=False, priority=True)]
+                Binding("space", "toggle", "Toggle", show=False, priority=True),
+                Binding("up", "move(-1)", show=False, priority=True),
+                Binding("down", "move(1)", show=False, priority=True)]
 
     def __init__(self, item: model.Item, *, start: str = "what", preset: dict | None = None,
                  projects: list[tuple[str, str]] | None = None, contexts: list[str] | None = None,
@@ -174,6 +195,9 @@ class ClarifyScreen(ModalScreen):
         self.step = fields[0] if fields else start
         self.history: list[str] = []
         self.sub: str | None = None                           # "new_project" or "other_context" text entry
+        self.project_choices: list[tuple[str, str | None]] = []  # the project search's rows: (kind, slug or text)
+        self.context_choices: list[tuple[str, str | None]] = []  # the context search's rows: (kind, name)
+        self.toggled: list[str] = []                          # contexts ticked with Space
 
     # Layout
 
@@ -239,8 +263,10 @@ class ClarifyScreen(ModalScreen):
         if self.sub:
             return "Enter confirm · Esc back"
         return {"tasks": "Tab add another · Enter done · Esc back",
+                "project": "type to search · ↑↓ move · Enter take · 1-9 pick (empty box) · Esc back",
+                "context": "type to search · Space tick several · Enter take · 1-9 pick (empty box) · Esc back",
                 "dates": "↑↓ pick · Enter take · Tab due/start · Esc back",
-                "context": "1-9 pick · Space toggle · Enter confirm · e edit list · Esc back"}.get(
+                }.get(
             self.step, "1-9 pick · j k move · Enter take · Esc back" if self.step in OPTION_STEPS
             else "Enter confirm · Esc back")
 
@@ -253,6 +279,10 @@ class ClarifyScreen(ModalScreen):
         picker = self.query_one("#card-picker", Vertical)
         await picker.remove_children()
         await picker.mount(self.make_picker())
+        if self.step == "project" and not self.sub:
+            self.fill_projects("")
+        if self.step == "context" and not self.sub:
+            self.fill_contexts("")
         self.query_one("#card-hint", Static).update(self.hint())
         self.focus_picker()
 
@@ -262,6 +292,63 @@ class ClarifyScreen(ModalScreen):
             if found:
                 found.first().focus()
                 return
+
+    def fill_projects(self, query: str) -> None:
+        """The project search: every word in the title or slug. An empty box lists No project
+        first; the last row starts a new project, named by the words typed when there are any."""
+        words = query.lower().split()
+        found = [(title, slug) for title, slug in self.projects
+                 if all(w in f"{title} {slug}".lower() for w in words)]
+        self.project_choices = ([] if words else [("none", None)]) + [("slug", slug) for _, slug in found] + \
+            [("new", query.strip() or None)]
+        labels = {"none": "No project", "new": f"New project: {query.strip()}" if query.strip() else "New project…"}
+        widget = self.query_one("#project-results", OptionList)
+        widget.clear_options()
+        widget.add_options([Option(Content(f"{n}  {self.titles[v] if k == 'slug' else labels[k]}"), id=str(n))
+                            for n, (k, v) in enumerate(self.project_choices, 1)])
+        current = next((n for n, (k, v) in enumerate(self.project_choices) if v == self.a.get("existing")
+                        and k == "slug"), 0) if not words else 0
+        widget.highlighted = current
+
+    def fill_contexts(self, query: str) -> None:
+        """The context search: contexts containing every word, ticked ones marked [x]. The
+        last rows add a new context (named by the words typed, when they are not one already)
+        and, with an empty box, open the contexts editor."""
+        words = query.lower().lstrip("@").split()
+        found = [c for c in self.contexts if all(w in c.lower() for w in words)]
+        typed = "@" + "-".join(query.strip().lstrip("@").split()) if words else None
+        self.context_choices = [("ctx", c) for c in found]
+        if typed and typed not in self.contexts:
+            self.context_choices.append(("new", typed))
+        elif not words:
+            self.context_choices += [("new", None), ("edit", None)]
+        self.redraw_contexts(0)
+
+    def redraw_contexts(self, highlight: int | None) -> None:
+        def label(kind: str, value: str | None) -> str:
+            if kind == "ctx":
+                return f"{'[x]' if value in self.toggled else '[ ]'} {value}"
+            if kind == "new":
+                return f"New context: {value}" if value else "Other…"
+            return "Edit the list…"
+        widget = self.query_one("#context-results", OptionList)
+        widget.clear_options()
+        widget.add_options([Option(Content(f"{n}  {label(k, v)}"), id=str(n))
+                            for n, (k, v) in enumerate(self.context_choices, 1)])
+        widget.highlighted = highlight if self.context_choices else None
+
+    @on(Input.Changed, "#context-search")
+    def context_typed(self, event: Input.Changed) -> None:
+        event.stop()
+        self.fill_contexts(event.value)
+
+    @on(Input.Changed, "#project-search")
+    def project_typed(self, event: Input.Changed) -> None:
+        event.stop()
+        self.fill_projects(event.value)
+
+    def action_move(self, step: int) -> None:
+        self.action_cursor(step)
 
     def options(self, labels: list[str], current: int | None = None) -> OptionList:
         widget = OptionList(*(Option(Content(f"{n}  {label}"), id=str(n)) for n, label in enumerate(labels, 1)))
@@ -277,20 +364,16 @@ class ClarifyScreen(ModalScreen):
         if step == "what":
             return self.options(TYPES, a.get("choice"))
         if step == "project":
-            labels = ["No project"] + [title for title, _ in self.projects] + ["New project…"]
-            slugs = [slug for _, slug in self.projects]
-            current = 1 if not a.get("existing") else slugs.index(a["existing"]) + 2 if a["existing"] in slugs else 1
-            return self.options(labels, current)
+            return Vertical(RowSearch(placeholder="Type to search projects…", id="project-search"),
+                            OptionList(id="project-results"), id="project-box")
         if step == "how":
             return self.options(HOWS, HOW_CODES.index(a["how"]) + 1 if a.get("how") else 1)
         if step == "context":
             chosen = (a.get("context") or "").split()
-            choices = self.contexts + [c for c in chosen if c not in self.contexts]
-            self.contexts = choices
-            widget = OptionList(*(Option(self.context_label(n, chosen), id=str(n)) for n in range(len(choices) + 1)))
-            widget.highlighted = 0
+            self.contexts = self.contexts + [c for c in chosen if c not in self.contexts]
             self.toggled = list(chosen)
-            return widget
+            return Vertical(RowSearch(placeholder="Type to search contexts…", id="context-search"),
+                            OptionList(id="context-results"), id="context-box")
         if step == "dates":
             return DatePicker(self.today, a.get("due"), a.get("start"), self.date_state)
         if step == "tasks":
@@ -301,12 +384,6 @@ class ClarifyScreen(ModalScreen):
         placeholder = {"outcome": "What does done look like?", "action": "The next physical, visible action",
                        "who": "Waiting for whom?"}[step]
         return Input(value=value, placeholder=placeholder, id="text")
-
-    def context_label(self, n: int, chosen: list[str]) -> Content:
-        if n >= len(self.contexts):
-            return Content(f"{n + 1}  Other…")
-        c = self.contexts[n]
-        return Content(f"{n + 1}  {'[x]' if c in chosen else '[ ]'} {c}")
 
     def tasks_list(self) -> Content:
         tasks = self.a.get("tasks") or []
@@ -327,7 +404,9 @@ class ClarifyScreen(ModalScreen):
         self.step = nxt
         await self.show_step()
 
-    async def choose(self, n: int) -> None:
+    async def choose(self, n: int, alone: bool = False) -> None:
+        """Take row n. On the Context row a number (alone) takes that context by itself;
+        Enter or a click takes the ticked ones when any are ticked."""
         step = self.step
         if step == "what":
             single = n == 1
@@ -337,41 +416,54 @@ class ClarifyScreen(ModalScreen):
                 values["action"] = self.a.get("action") or self.item.text  # filled from the item, never asked twice
             return await self.answer(**values)
         if step == "project":
-            if n == len(self.projects) + 2:                   # New project…
+            kind, value = self.project_choices[n - 1]
+            if kind == "new" and not value:                   # New project…: name it first
                 self.sub = "new_project"
                 return await self.show_step()
-            return await self.answer(existing=None if n == 1 else self.projects[n - 2][1], new_project=None)
+            if kind == "new":                                 # New project: <the words typed>
+                return await self.answer(existing=None, new_project=value)
+            return await self.answer(existing=value, new_project=None)
         if step == "how":
             return await self.answer(how=HOW_CODES[n - 1])
         if step == "context":
-            if n == len(self.contexts) + 1:
+            kind, value = self.context_choices[n - 1]
+            if kind == "edit":
+                return await self.action_rephrase()
+            if kind == "new" and not value:                   # Other…: name it first
                 self.sub = "other_context"
                 return await self.show_step()
-            return await self.answer(context=self.contexts[n - 1])
+            picked = [c for c in self.contexts if c in self.toggled] + ([value] if kind == "new" else [])
+            if kind == "ctx" and (alone or not self.toggled):  # a number, or nothing ticked: this one alone
+                picked = [value]
+            return await self.answer(context=" ".join(picked))
 
     async def on_key(self, event) -> None:
         if self.step in OPTION_STEPS and not self.sub and event.character and event.character.isdigit():
-            n = int(event.character)
-            limit = {"what": len(TYPES), "how": len(HOWS), "project": len(self.projects) + 2,
-                     "context": len(self.contexts) + 1}[self.step]
-            if 1 <= n <= limit:
-                event.stop()
-                await self.choose(n)
+            event.stop()
+            await self.pick_number(int(event.character))
+
+    async def pick_number(self, n: int) -> None:
+        limit = {"what": len(TYPES), "how": len(HOWS), "project": len(self.project_choices),
+                 "context": len(self.context_choices)}[self.step]
+        if 1 <= n <= limit:
+            await self.choose(n, alone=True)
 
     @on(OptionList.OptionSelected)
     async def picked(self, event: OptionList.OptionSelected) -> None:
         if self.step not in OPTION_STEPS or self.sub:
             return
         event.stop()
-        n = int(event.option.id) + (1 if self.step == "context" else 0)
-        if self.step == "context" and self.toggled:
-            return await self.answer(context=" ".join(c for c in self.contexts if c in self.toggled))
-        await self.choose(n)
+        await self.choose(int(event.option.id))
 
     @on(Input.Submitted)
     async def submitted(self, event: Input.Submitted) -> None:
         event.stop()
         text = event.value.strip()
+        if self.step in ("project", "context") and not self.sub:
+            widget = self.query_one(f"#{self.step}-results", OptionList)
+            if widget.highlighted is not None:
+                await self.choose(widget.highlighted + 1)
+            return
         if self.sub == "new_project":
             if text:
                 self.sub = None
@@ -411,19 +503,20 @@ class ClarifyScreen(ModalScreen):
     def action_toggle(self) -> None:
         if self.step != "context" or self.sub:
             return
-        options = self.query_one("#card-picker").query_one(OptionList)
-        n = options.highlighted
-        if n is None or n >= len(self.contexts):
+        n = self.query_one("#context-results", OptionList).highlighted
+        if n is None or self.context_choices[n][0] != "ctx":
             return
-        c = self.contexts[n]
+        c = self.context_choices[n][1]
         self.toggled = [x for x in self.toggled if x != c] if c in self.toggled else self.toggled + [c]
-        options.replace_option_prompt_at_index(n, self.context_label(n, self.toggled))
+        self.redraw_contexts(n)
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         if action == "toggle":   # Space only toggles contexts; elsewhere it types a space
             return self.step == "context" and not self.sub
         if action in ("cursor", "rephrase"):
             return not isinstance(self.focused, Input)
+        if action == "move":
+            return self.step in ("project", "context") and not self.sub
         return True
 
     def action_cursor(self, step: int) -> None:

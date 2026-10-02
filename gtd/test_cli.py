@@ -57,6 +57,55 @@ def test_done_refuses_ambiguous_or_missing(areas):
         cli.cmd_done(areas, "nothing like this", TODAY)
 
 
+def test_done_matches_words_in_any_order_and_tags(areas):
+    assert cli.cmd_done(areas, "plumber call", TODAY) == "Ticked in home: Call plumber"
+    cli.cmd_add(areas, "work", "Draft the memo +offsite", TODAY)
+    assert cli.cmd_done(areas, "memo +offsite", TODAY) == "Ticked in work: Draft the memo"
+
+
+def test_done_hands_several_to_the_picker_and_refuses_none(areas):
+    cli.cmd_add(areas, "work", "Call plumber again", TODAY)
+    seen = []
+    assert cli.cmd_done(areas, "plumber", TODAY, lambda words: seen.append(words) or ["Ticked x"]) == "Ticked x"
+    assert seen == ["plumber"]
+    assert cli.cmd_done(areas, "plumber", TODAY, lambda words: []) == "Nothing changed."
+    with pytest.raises(SystemExit, match="0 open items match"):
+        cli.cmd_done(areas, "nothing like this", TODAY, lambda words: ["never"])
+
+
+def test_find_matches_projects_contexts_and_people(areas):
+    cli.cmd_add(areas, "work", "Send the note +payments-strategy waiting:nils", TODAY)
+    cli.cmd_add(areas, "work", "Agenda item @agenda-mike", TODAY)
+    hits = lambda words: sorted(i.text for _, _, i in cli.matches(areas, words))  # noqa: E731
+    assert hits("+payments") == ["Send the note"]
+    assert hits("waiting:nils") == hits("nils") == ["Send the note"]
+    assert hits("mike") == ["Agenda item"]
+    assert hits("@calls") == ["Call plumber"]
+
+
+def test_pick_app_works_through_a_set(areas):
+    import asyncio
+    from gtd.pick import PickApp
+    cli.cmd_add(areas, "work", "Call plumber again", TODAY)
+
+    async def go(query, *keys):
+        app = PickApp(areas, query, TODAY)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            for key in keys:
+                await pilot.press(key)
+                await pilot.pause()
+        return app.return_value
+    # a query lands in the list: s stars the first (In sorts first), ↓ Space ticks the second
+    assert asyncio.run(go("plumber", "s", "down", "space", "escape")) == [
+        "Starred in work: Call plumber again", "Ticked in home: Call plumber"]
+    assert [i.star for i in store.load(areas["work"].file).items(Section.IN)] == [TODAY]
+    assert texts(areas["home"], Section.DONE) == ["Call plumber"]
+    # no query starts in the box, where letters type; Tab moves to the list
+    assert asyncio.run(go("", *"rent", "tab", "space", "escape")) == ["Ticked in home: Pay rent (next due 2026-11-01)"]
+    assert asyncio.run(go("plumber", "escape")) == []
+
+
 def test_list_is_json_for_skills(areas, capsys, monkeypatch):
     monkeypatch.setattr(config, "load", lambda: (areas, "work"))
     cli.main(["list", "--area", "home", "--section", "next"], today=TODAY)

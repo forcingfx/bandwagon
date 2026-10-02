@@ -158,6 +158,14 @@ def find(doc: Doc, section: Section, line: str) -> Item | None:
 EVERY = re.compile(r"^(daily|weekly|monthly|yearly|(\d+)-(days|weeks|months|years))$")
 
 
+def task_matches(query: str, item: Item) -> bool:
+    """Every word of the query appears in the task's text or tags. Plain substrings, not
+    fuzzy: fuzzy matching is exponential on long task lines and stalls typing."""
+    hay = " ".join(filter(None, [item.text, item.context, item.project and f"+{item.project}",
+                                 item.waiting and f"waiting:{item.waiting}"])).lower()
+    return all(word in hay for word in query.lower().split())
+
+
 def valid_every(value: str) -> bool:
     return bool(EVERY.match(value))
 

@@ -22,7 +22,7 @@ from textual.widgets.option_list import Option
 from . import config, dates, model, store
 from .clarify import ClarifyScreen, prefill_from_item
 from .datescreen import DatePicker, DateScreen
-from .model import Section
+from .model import Section, task_matches
 
 LIST_ORDER = [Section.IN, Section.NEXT, Section.PROJECTS, Section.WAITING, Section.SOMEDAY, Section.DONE]
 FOCUS = "focus"  # the Focus tab: every starred open item, from any list; shown after In while any exist
@@ -39,6 +39,7 @@ REVIEW_STEPS = [
 REVIEW_NAMES = ["Get Clear", "Next Actions", "Waiting For", "Projects", "Someday"]
 COUNT_COLOUR = "#73d0ff"  # the kitty palette's bright blue
 LINK_COLOUR = "#95e6cb"   # the kitty palette's bright cyan
+GROUP_WIDTH = 76          # a project header bar, in characters
 CHIP_MAX = 32             # chips are names; anything longer is cut with …
 TAB_NAMES = {Section.IN: "In", Section.NEXT: "Next", Section.PROJECTS: "Projects",
              Section.WAITING: "Waiting", Section.SOMEDAY: "Someday", Section.DONE: "Done", FOCUS: "Focus"}
@@ -176,7 +177,10 @@ class ItemList(OptionList, inherit_bindings=False):
         clicked = event.style.meta.get("option")
         if clicked is not None and not self._options[clicked].disabled:
             self.highlighted = clicked  # highlight only: Enter, not a click, acts on the item
-            if event.style.meta.get("gtd_tick"):  # a click on the checkbox ticks (or unticks)
+            kind, value = self.app.rows[clicked]
+            if kind == "more":  # except "show N more" / "show less", which a click toggles
+                await self.app.toggle_group(value[0])
+            elif event.style.meta.get("gtd_tick"):  # a click on the checkbox ticks (or unticks)
                 await self.app.action_complete()
 
     def action_cursor_down(self) -> None:
@@ -209,14 +213,6 @@ PALETTE_GROUPS = [  # (heading, the actions it holds, by name before any "(")
     ("Settings", {"manage_contexts", "capture_to", "prune_now", "toggle_prune", "quit"}),
 ]
 PALETTE_WIDTH = 76  # characters in a row: the name on the left, its key or list on the right
-
-
-def task_matches(query: str, item: model.Item) -> bool:
-    """Every word of the query appears in the task's text or tags. Plain substrings, not
-    fuzzy: fuzzy matching is exponential on long task lines and stalls typing."""
-    hay = " ".join(filter(None, [item.text, item.context, item.project and f"+{item.project}",
-                                 item.waiting])).lower()
-    return all(word in hay for word in query.lower().split())
 
 
 def highlight_words(text: str, query: str) -> Content:
@@ -741,6 +737,7 @@ class GTDApp(App):
         self._tag_notes: dict[tuple, str | None] = {}  # (area, kind, name) -> note path, cached
         self.marked: set[tuple[str, str]] = set()  # (area, line) marked with x in the current list
         self.anchor: int | None = None  # row where a Shift+arrow selection started
+        self.expanded: set[tuple] = set()  # (area, slug) of projects showing all their next actions
         self.anchor_base: set = set()   # marks that existed before it
         # Per change: [(file, text before, text after)] for every file that change touched.
         self.undo_stack: list[list[tuple[Path, str | None, str]]] = []
@@ -774,9 +771,15 @@ class GTDApp(App):
         outside = ([] if self.current is Section.DONE  # ticked in Obsidian, not yet filed
                    else [i for i in items if i.done and i.raw is None])
         own, proposals = in_order([i for i in items if not any(i is o for o in outside)])
-        self.shown = own + proposals
-        self.marked &= {(i.area, i.line()) for i in self.shown}
+        recurring: list[model.Item] = []
         rows: list[tuple[str, object]] = [("item", i) for i in own]
+        if self.current is Section.NEXT:  # one-offs by project, untitled ones first; recurring ones in their own block
+            recurring = [i for i in own if i.every]
+            rows, own = self.project_groups([i for i in own if not i.every])
+        self.shown = own + recurring + proposals
+        self.marked &= {(i.area, i.line()) for i in self.shown}
+        if recurring:
+            rows += [("divider", f"recurring · {len(recurring)}")] + [("item", i) for i in recurring]
         if self.current is Section.PROJECTS and len(self.view_areas) > 1:  # one coloured block per vault
             rows = [row for area in self.view_areas for row in
                     ([("header", area)] + [("item", i) for i in own if i.area == area]
@@ -793,6 +796,38 @@ class GTDApp(App):
         else:
             self.ticked.pop(self.current, None)
         self.draw_rows(rows, stalled)
+
+    GROUP_FOLD = 5  # a project shows this many one-off next actions, then "show N more"
+
+    def project_groups(self, items: list[model.Item]) -> tuple[list, list[model.Item]]:
+        """Next Actions rows: tasks without a project first, untitled, then a header bar per
+        project, in the order projects first appear. A project with more than GROUP_FOLD
+        tasks shows the first GROUP_FOLD and a "show N more" row; expanded, a "show less" row."""
+        loose = [i for i in items if not i.project]
+        groups: dict[tuple, list[model.Item]] = {}
+        for i in items:
+            if i.project:
+                groups.setdefault((i.area, i.project), []).append(i)
+        rows: list[tuple[str, object]] = [("item", i) for i in loose]
+        shown = list(loose)
+        for key, members in groups.items():
+            folds = len(members) > self.GROUP_FOLD
+            visible = members if key in self.expanded or not folds else members[:self.GROUP_FOLD]
+            rows += [("project", (key, members[0], len(members)))] + [("item", i) for i in visible]
+            shown += visible
+            if folds:
+                rows.append(("more", (key, len(members) - len(visible))))
+        return rows, shown
+
+    async def toggle_group(self, key: tuple) -> None:
+        """Enter or a click on "show N more" / "show less": expand or fold the project, the
+        cursor on the first task that appeared, or back on the fold row."""
+        self.expanded ^= {key}
+        await self.render_lists()
+        header = next(n for n, (k, v) in enumerate(self.rows) if k == "project" and v[0] == key)
+        fold_row = next(n for n, (k, v) in enumerate(self.rows) if k == "more" and v[0] == key)
+        self.query_one("#items", ItemList).highlighted = \
+            header + 1 + self.GROUP_FOLD if key in self.expanded else fold_row
 
     def draw_rows(self, rows: list, stalled: set) -> None:
         self.rows = rows
@@ -873,6 +908,16 @@ class GTDApp(App):
         if kind == "header":
             colour = AREA_COLOURS.get(value, COUNT_COLOUR)
             return Option(Content.styled(f" {value.upper()} ", f"bold #212733 on {colour}"), disabled=True)
+        if kind == "project":  # a full-width bar per project, a blank line above it
+            (area, _), sample, count = value
+            label = f" {self.project_title(sample).upper()}  {count} "
+            colour = AREA_COLOURS.get(area, COUNT_COLOUR)
+            return Option(Content("\n") + Content.styled(label.ljust(GROUP_WIDTH), f"bold #212733 on {colour}"),
+                          disabled=True)
+        if kind == "more":
+            hidden = value[1]
+            label = f"show {hidden} more" if hidden else "show less"  # no ▸: → switches lists, Enter does this
+            return Option(Content.assemble(("      " + label, COUNT_COLOUR), ("  ⏎", "dim")))
         item = value[0] if kind == "ticked" else value
         return Option(self.describe(item, stalled, marked=(item.area, item.line()) in self.marked))
 
@@ -880,7 +925,7 @@ class GTDApp(App):
         """The selectable row closest to `index`, looking up first (after a row left the list)."""
         if index is None:
             return None
-        selectable = [n for n, (kind, _) in enumerate(self.rows) if kind not in ("divider", "header")]
+        selectable = [n for n, (kind, _) in enumerate(self.rows) if kind not in ("divider", "header", "project")]
         before = [n for n in selectable if n <= index]
         return before[-1] if before else (selectable[0] if selectable else None)
 
@@ -928,11 +973,22 @@ class GTDApp(App):
             parts.append(("★ ", STAR_COLOUR))
         if self.current is Section.PROJECTS and not self.project_view and item.project in stalled:
             parts.append(("⚠ no next action · ", "yellow"))
+        chips = self.chips(item)
+        # The project leads the row, linked to its note when there is one; not on the
+        # Projects list (the row is the project) or on a project's own page.
+        grouped = self.current is Section.NEXT and not item.every  # under its project's header
+        if item.project and not self.project_view and self.current is not Section.PROJECTS and not grouped:
+            note = self.tag_note(item, "project", item.project)
+            project = (self.project_title(item), note and self.resolve(item, note))
+            chips = [c for c in chips if c != project]
+            label = project[0] if len(project[0]) <= CHIP_MAX else project[0][:CHIP_MAX - 1] + "…"
+            parts += [self.link_part(label, project[1]) if project[1] else (label, "dim bold"), ("  ", "")]
+        elif grouped and item.project:
+            chips = [c for c in chips if c[0] != self.project_title(item)]
         # Proposals (items with a source) are dimmed so Arjun's own captures stand out; link
         # syntax is shown as its label, underlined, and o opens it.
         base = "strike dim" if item.done else "dim" if item.src else ""
         action, _ = model.split_trailing_links(item.text)
-        chips = self.chips(item)
         same = next(((label, url) for label, url in chips if label.casefold() == action.strip().casefold()), None)
         if same:  # a project row titled like its note: the title is the link, with no repeat chip
             chips.remove(same)
@@ -947,9 +1003,8 @@ class GTDApp(App):
             parts.append(self.link_part(label, url, base) if url else (label, "dim"))
         if self.current is Section.PROJECTS and not self.project_view and item.project and not item.done:
             parts.append((f"  {self.project_counts(item)}", "dim"))
-        tags = [t for t in (*item.contexts, item.every and f"every:{item.every}") if t]
-        if tags:
-            parts.append(("  " + " ".join(tags), "dim"))
+        if item.every:
+            parts.append((f"  every:{item.every}", "dim"))
         if model.starts_later(item, self.today):
             parts.append((f"  starts {item.start:%b %-d}", "dim italic"))
         if item.due and not item.done:
@@ -964,6 +1019,8 @@ class GTDApp(App):
                              item.done_on and f"done:{item.done_on}") if t]
         if dates:
             parts.append(("  " + " ".join(dates), "dim"))
+        if item.contexts:  # contexts close the row
+            parts.append(("  " + " ".join(item.contexts), "dim"))
         return Content.assemble(*parts)
 
     def update_status(self) -> None:
@@ -1720,6 +1777,9 @@ class GTDApp(App):
     async def action_primary(self) -> None:
         """Enter: the obvious thing for this list. Clarify on In and Someday, add a next
         action on Projects, edit everywhere else."""
+        kind, value = self.highlighted_row()
+        if kind == "more":
+            return await self.toggle_group(value[0])
         if self.selected() is None:
             return
         item = self.selected()
