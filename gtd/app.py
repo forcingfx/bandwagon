@@ -655,7 +655,7 @@ class GTDApp(App):
     #items:focus { border: none; }
     #status { height: 1; background: $boost; padding: 0 1; }
     #keys { height: 1; padding: 0 1; color: $text-muted; }
-    AskScreen, TextScreen, CaptureScreen, HelpScreen, ContextScreen, DateScreen, ContextsScreen { align: center middle; }
+    ModalScreen { align: center middle; }  /* every pop-up, including ones added later */
     .stepbar { margin-bottom: 1; }
     DatePicker { height: auto; }
     DatePicker #suggestions { height: auto; max-height: 7; margin-top: 1; }

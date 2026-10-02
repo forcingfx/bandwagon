@@ -1336,3 +1336,23 @@ def test_bulk_delete_on_focus_removes_rows_from_their_own_lists(tmp_path):
     run(path, "right", "x", "down", "x", "backspace")
     doc = store.load(path)
     assert [i.text for i in doc.items(Section.NEXT)] == ["Call Fred"] and doc.items(Section.WAITING) == []
+
+
+def test_every_pop_up_is_centred(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text(ONE_IN)
+
+    async def go():
+        app = GTDApp(path, today=TODAY)
+        seen = {}
+        async with app.run_test(size=(100, 40)) as pilot:
+            for keys in (("c",), ("question_mark",), ("L",), ("a",), ("down", "h")):
+                await pilot.press(*keys); await pilot.pause()
+                screen = app.screen
+                seen[type(screen).__name__] = (str(screen.styles.align_horizontal), str(screen.styles.align_vertical))
+                while app.screen is not app.screen_stack[0]:
+                    app.pop_screen(); await pilot.pause()
+        return seen
+    seen = asyncio.run(go())
+    assert set(seen) >= {"ClarifyScreen", "HelpScreen", "ContextsScreen", "CaptureScreen"}
+    assert all(align == ("center", "middle") for align in seen.values()), seen
