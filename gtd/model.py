@@ -39,6 +39,7 @@ class Item:
     since: date | None = None
     added: date | None = None
     done_on: date | None = None
+    star: date | None = None    # starred for Focus on this day; stays until done or unstarred
     raw: str | None = None  # a line the parser could not read, kept verbatim
     area: str | None = field(default=None, compare=False)  # which file it lives in; never written
 
@@ -54,7 +55,7 @@ class Item:
             parts.append(self.context)
         if self.project:
             parts.append(f"+{self.project}")
-        for key in ("waiting", "src", "every", "start", "due", "since", "added"):
+        for key in ("waiting", "src", "every", "start", "due", "since", "added", "star"):
             value = getattr(self, key)
             if value:
                 parts.append(f"{key}:{value}")
@@ -267,6 +268,7 @@ def complete(doc: Doc, item: Item, today: date) -> date | None:
         item.due = next_due(item.due, item.every, today)
         if item.start:  # keep the same lead time before the new due date
             item.start = item.start + (item.due - was)
+        item.star = None  # done for now: the next round is not starred
         return was
     doc.remove(item)
     item.done, item.done_on = True, today

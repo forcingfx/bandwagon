@@ -19,7 +19,7 @@ from .model import Doc, Item, Section, prune_done, valid_every
 
 HEADER = re.compile(r"<!-- gtd v1(?: · last-review: (\d{4}-\d{2}-\d{2}))?( · prune: manual)? -->")
 ITEM = re.compile(r"^- \[( |x)\] (.+)$")
-DATE_TAGS = {"since", "added", "done", "due", "start"}
+DATE_TAGS = {"since", "added", "done", "due", "start", "star"}
 TEXT_TAGS = {"waiting", "src", "every"}
 
 

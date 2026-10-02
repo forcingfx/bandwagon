@@ -25,6 +25,8 @@ from .datescreen import DatePicker, DateScreen
 from .model import Section
 
 LIST_ORDER = [Section.IN, Section.NEXT, Section.PROJECTS, Section.WAITING, Section.SOMEDAY, Section.DONE]
+FOCUS = "focus"  # the Focus tab: every starred open item, from any list; shown after In while any exist
+STAR_COLOUR = "#ffd580"   # the kitty palette's yellow
 
 # The weekly review (ch. 8) as a tour of the real lists: Get Clear, Get Current, Get Creative.
 REVIEW_STEPS = [
@@ -39,17 +41,18 @@ COUNT_COLOUR = "#73d0ff"  # the kitty palette's bright blue
 LINK_COLOUR = "#95e6cb"   # the kitty palette's bright cyan
 CHIP_MAX = 32             # chips are names; anything longer is cut with …
 TAB_NAMES = {Section.IN: "In", Section.NEXT: "Next", Section.PROJECTS: "Projects",
-             Section.WAITING: "Waiting", Section.SOMEDAY: "Someday", Section.DONE: "Done"}
+             Section.WAITING: "Waiting", Section.SOMEDAY: "Someday", Section.DONE: "Done", FOCUS: "Focus"}
 # The key line follows the list you're on (lazygit-style); the tail is the same everywhere.
 LIST_KEYS = {
-    Section.IN: "a capture · ⏎ clarify · space tick · d dates · o open · x mark · ⌫ delete",
-    Section.NEXT: "space tick · m project · l context · d dates · c re-clarify · f filter · o open · ⌫ delete",
+    Section.IN: "a capture · ⏎ clarify · s star · space tick · h dates · o open · ⌫ delete",
+    FOCUS: "space tick · s unstar · ⏎ edit · c re-clarify · h dates · a capture starred · o open",
+    Section.NEXT: "space tick · s star · m project · l context · h dates · c re-clarify · f filter · ⌫ delete",
     Section.PROJECTS: "⏎ open · c add tasks · space tick · x mark · ⌫ delete",
-    Section.WAITING: "space received · p who · d dates · m project · c re-clarify · o open · ⌫ delete",
-    Section.SOMEDAY: "⏎ clarify · c re-clarify · d dates · x mark · ⌫ delete · a capture",
+    Section.WAITING: "space received · s star · p who · h dates · m project · c re-clarify · ⌫ delete",
+    Section.SOMEDAY: "⏎ clarify · c re-clarify · s star · h dates · ⌫ delete · a capture",
     Section.DONE: "space reopen · x mark · ⌫ delete",
 }
-KEYS_TAIL = "z undo · ← → lists · v vault · s later · w review · / search · ? keys"
+KEYS_TAIL = "z undo · ← → lists · v vault · d later · w review · / search · ? keys"
 # Every key, grouped, for the ? screen.
 HELP = [
     ("Move", [("↑ ↓ or j k", "move through the list"), ("Home End", "first / last item"),
@@ -61,15 +64,37 @@ HELP = [
                                      ("x", "mark for a bulk delete"), ("⌫ Del", "delete the marked rows, or this one"),
                                      ("e", "edit the text"), ("c", "re-clarify: change anything, move lists"),
                                      ("m", "project"), ("l", "context"), ("p", "waiting for (moves to Waiting For)"),
-                                     ("d", "dates: type 2, fri, dec 5 or -3 (before due) and pick a suggestion"),
+                                     ("s", "star for Focus (again to unstar); the Focus tab lists every star"),
+                                     ("h", "dates: type 2, fri, dec 5 or -3 (before due) and pick a suggestion"),
                                      ("z", "undo the last change")]),
     ("The five steps", [("a", "capture (Tab: save and capture another)"), ("c", "clarify In"),
                         ("w", "weekly review (n next step, Esc stop)"), ("f", "show one context in Next Actions"),
                         ("L", "contexts: add, rename, delete, reorder"),
-                        ("s", "show or hide tasks whose start date is still ahead")]),
+                        ("d", "show or hide deferred tasks, whose start date is still ahead")]),
     ("Everything else", [("/", "search tasks and commands"), ("?", "this screen"), ("Esc", "clear marks / stop review"),
                          ("q", "quit")]),
 ]
+
+
+HINT_KEYS = {"space", "tab", "⇧tab", "esc", "Esc", "Space"}
+
+
+def hint_content(hints: str) -> Content:
+    """The key line with each key in colour and its label plain: "a capture · ← → lists"."""
+    parts: list = []
+    for n, segment in enumerate(hints.split(" · ")):
+        words = segment.split(" ")
+        keys = 0
+        while keys < len(words) - 1 and (len(words[keys]) <= 3 or words[keys] in HINT_KEYS):
+            keys += 1
+        if n:
+            parts.append(("  ", ""))
+        if keys:
+            parts.append((" ".join(words[:keys]), f"bold {COUNT_COLOUR}"))
+            parts.append((" " + " ".join(words[keys:]), "dim"))
+        else:
+            parts.append((segment, "dim"))
+    return Content.assemble(*parts)
 
 
 def focused_workspace() -> str | None:
@@ -178,7 +203,7 @@ class ItemList(OptionList, inherit_bindings=False):
 
 
 PALETTE_GROUPS = [  # (heading, the actions it holds, by name before any "(")
-    ("Do", {"capture", "clarify", "complete", "undo", "review", "review_next", "engage", "open_link"}),
+    ("Do", {"capture", "clarify", "star", "complete", "undo", "review", "review_next", "engage", "open_link"}),
     ("Edit item", {"edit", "edit_field", "delete", "toggle_mark"}),
     ("Lists & views", {"go", "cycle_view", "show_area", "toggle_later", "clear_ticked", "clear_proposals", "help"}),
     ("Settings", {"manage_contexts", "capture_to", "prune_now", "toggle_prune", "quit"}),
@@ -666,7 +691,8 @@ class GTDApp(App):
         Binding("escape", "escape", "Clear marks / stop review", show=False),
         Binding("x", "toggle_mark", "Mark", show=False),
         Binding("o", "open_link", "Open link", show=False),
-        Binding("s", "toggle_later", "Show/hide later", show=False),
+        Binding("s", "star", "Star", show=False),
+        Binding("d", "toggle_later", "Show/hide deferred", show=False),
         Binding("v", "cycle_view", "Vault view", show=False),
         Binding("backspace", "delete", "Delete", show=False),
         Binding("delete", "delete", "Delete", show=False),
@@ -675,7 +701,7 @@ class GTDApp(App):
         Binding("e", "edit", "Edit"),
         Binding("m", "edit_field('project')", "Project", show=False),
         Binding("l", "edit_field('context')", "Context", show=False),
-        Binding("d", "edit_field('dates')", "Dates", show=False),
+        Binding("h", "edit_field('dates')", "Dates", show=False),
         Binding("p", "edit_field('who')", "Waiting for", show=False),
         Binding("L", "manage_contexts", "Contexts", show=False),
         Binding("q", "quit", "Quit"),
@@ -691,6 +717,7 @@ class GTDApp(App):
         self.contexts = list(contexts or config.DEFAULT_CONTEXTS)
         self.config_path = config_path  # where the contexts editor saves; None keeps changes in memory
         self.show_later = False  # tasks whose start: is after today stay hidden until toggled
+        self.focus_origin: dict[str, Section] = {}  # Done line → the list an item ticked on Focus came from
         self.project_view: tuple[str, str] | None = None  # (area, slug) while a project page is open
         self.header: Content | None = None  # the clarify step bar while clarify runs
         self.clarify_progress: tuple[int, int] | None = None
@@ -737,6 +764,8 @@ class GTDApp(App):
         stalled = {p.project for p in model.stalled_projects(self.doc)}
         if self.project_view:
             return await self.render_project_page(stalled)
+        if self.current == FOCUS:
+            return self.render_focus(stalled)
         items = self.visible_items(self.current)
         if self.current is Section.NEXT and self.context_filter:
             items = [i for i in items if self.context_filter in i.contexts]
@@ -774,6 +803,33 @@ class GTDApp(App):
         view.highlighted = self.nearest_row(index)
         self.update_status()
 
+    FOCUS_SECTIONS = [Section.NEXT, Section.WAITING, Section.IN, Section.PROJECTS, Section.SOMEDAY]
+
+    def focus_items(self) -> list[model.Item]:
+        """Every starred open item in the visible vaults, in list order."""
+        return [i for sec in self.FOCUS_SECTIONS for i in self.visible_items(sec)
+                if i.star and not i.done and i.raw is None]
+
+    def tab_order(self) -> list:
+        """The tabs: Focus sits after In while anything is starred (or while it is open)."""
+        if self.current == FOCUS or self.focus_items():
+            return LIST_ORDER[:1] + [FOCUS] + LIST_ORDER[1:]
+        return LIST_ORDER
+
+    def render_focus(self, stalled: set) -> None:
+        own = self.focus_items()
+        self.shown = own
+        self.marked &= {(i.area, i.line()) for i in own}
+        rows: list[tuple[str, object]] = [("item", i) for i in own]
+        done = {x.line(): x for x in self.doc.items(Section.DONE)}
+        ticked = [(done[t.line()], pos) for t, pos in self.ticked.get(FOCUS, []) if t.line() in done]
+        if ticked:
+            self.ticked[FOCUS] = ticked
+            rows += [("divider", f"ticked · {len(ticked)}")] + [("ticked", entry) for entry in ticked]
+        else:
+            self.ticked.pop(FOCUS, None)
+        self.draw_rows(rows, stalled)
+
     PAGE_SECTIONS = [Section.NEXT, Section.WAITING, Section.SOMEDAY, Section.IN, Section.DONE]
 
     async def render_project_page(self, stalled: set) -> None:
@@ -793,7 +849,8 @@ class GTDApp(App):
 
     def section_of(self, item: model.Item) -> Section:
         """The list an item lives in (a project page shows items from several)."""
-        return next((s for s in Section if any(i is item for i in self.doc.items(s))), self.current)
+        fallback = self.current if self.current != FOCUS else Section.NEXT
+        return next((s for s in Section if any(i is item for i in self.doc.items(s))), fallback)
 
     async def open_project(self, item: model.Item) -> None:
         self.project_view = (item.area, item.project)
@@ -844,12 +901,14 @@ class GTDApp(App):
                 style = f"bold #212733 on {colour}" if active else ("dim " + colour if name else "dim")
                 parts.append(Content.styled(f" {label} ", style).stylize(Style.from_meta({"gtd_area": name})))
             parts.append(("  ", ""))
-        for n, sec in enumerate(LIST_ORDER):
+        for n, sec in enumerate(self.tab_order()):
             if n:
                 parts.append(("│", "dim"))
-            here = "reverse bold " if sec is self.current else ""
-            tab = Content.assemble((f" {TAB_NAMES[sec]} ", here.strip()),
-                                   (f"{len(self.visible_items(sec))} ", here + COUNT_COLOUR))
+            here = "reverse bold " if sec == self.current else ""
+            count = len(self.focus_items()) if sec == FOCUS else len(self.visible_items(sec))
+            name = f" ★ {TAB_NAMES[sec]} " if sec == FOCUS else f" {TAB_NAMES[sec]} "
+            tab = Content.assemble((name, here + (STAR_COLOUR if sec == FOCUS else "")),
+                                   (f"{count} ", here + (STAR_COLOUR if sec == FOCUS else COUNT_COLOUR)))
             parts.append(tab.stylize(Style.from_meta({"gtd_tab": n})))
             if sec is Section.PROJECTS and self.project_view:  # breadcrumb to the open project
                 area, slug = self.project_view
@@ -865,6 +924,8 @@ class GTDApp(App):
             return Content.assemble(bar, gap, item.line())
         box = Content.styled("[✔]", "bold #4ade80") if item.done else Content.styled("[ ]", "bold")
         parts: list = [bar, box.stylize(Style.from_meta({"gtd_tick": True})), gap, " "]
+        if item.star and not item.done:
+            parts.append(("★ ", STAR_COLOUR))
         if self.current is Section.PROJECTS and not self.project_view and item.project in stalled:
             parts.append(("⚠ no next action · ", "yellow"))
         # Proposals (items with a source) are dimmed so Arjun's own captures stand out; link
@@ -895,6 +956,8 @@ class GTDApp(App):
             late = item.due < self.today
             soon = (item.due - self.today).days <= 2
             parts.append((f"  due {item.due:%b %-d}", "bold #f28779" if late else "#ffd580" if soon else "dim"))
+        if self.current == FOCUS and not item.done:  # where it lives
+            parts.append((f"  {TAB_NAMES[self.section_of(item)]}", "dim italic"))
         listing_projects = self.current is Section.PROJECTS and not self.project_view
         dates = [t for t in (item.since and f"since:{item.since}",
                              not listing_projects and item.added and f"added:{item.added}",
@@ -916,7 +979,7 @@ class GTDApp(App):
             self.keys_text = hints
             self.query_one("#status", Static).update(Content.assemble(
                 (f"Review {n + 1}/{len(REVIEW_STEPS)} · ", "bold"), bar, (f" · {instruction}", "")))
-            self.query_one("#keys", Static).update(hints)
+            self.query_one("#keys", Static).update(hint_content(hints))
             return
         elif self.marked:
             self.status_text = self.allen_status()
@@ -931,7 +994,7 @@ class GTDApp(App):
             chip = [(f" {name.upper()} ", f"bold #212733 on {AREA_COLOURS.get(name, COUNT_COLOUR)}"), " "]
         self.query_one("#status", Static).update(Content.assemble(
             *chip, (self.status_text, "bold yellow" if overdue and self.review_step is None else "bold")))
-        self.query_one("#keys", Static).update(hints)
+        self.query_one("#keys", Static).update(hint_content(hints))
 
     def allen_status(self) -> str:
         """The three things Allen watches: In at zero, every project moving, the weekly review current."""
@@ -1084,11 +1147,13 @@ class GTDApp(App):
     async def action_step_list(self, step: int) -> None:
         if self.project_view:  # ← and → leave a project page first
             return await self.close_project()
-        await self.action_go((LIST_ORDER.index(self.current) + step) % len(LIST_ORDER))
+        tabs = self.tab_order()
+        await self.action_go((tabs.index(self.current) + step) % len(tabs))
 
     async def action_go(self, index: int) -> None:
         self.project_view = None
-        await self.show(LIST_ORDER[index])
+        tabs = self.tab_order()
+        await self.show(tabs[min(index, len(tabs) - 1)])
         view = self.query_one("#items", ItemList)
         view.focus()
         view.highlighted = self.first_row()
@@ -1108,17 +1173,19 @@ class GTDApp(App):
             ("Edit highlighted item", "e", "edit"),
             ("Set project of highlighted item", "m", "edit_field('project')"),
             ("Set context of highlighted item", "l", "edit_field('context')"),
-            ("Set dates of highlighted item", "d", "edit_field('dates')"),
+            ("Set dates of highlighted item", "h", "edit_field('dates')"),
+            ("Star or unstar highlighted item for Focus", "s", "star"),
             ("Waiting for someone on highlighted item", "p", "edit_field('who')"),
             ("Clarify In, or re-clarify the highlighted item", "c", "clarify"),
             ("Delete marked or highlighted item", "⌫", "delete"),
             ("Mark or unmark highlighted item", "x", "toggle_mark"),
             ("Open a link in highlighted item", "o", "open_link"),
-            ("Show or hide tasks that start later", "s", "toggle_later"),
+            ("Show or hide deferred tasks (start date ahead)", "d", "toggle_later"),
             ("Show every key", "?", "help"),
             ("Show one context in Next Actions", "f", "engage"),
             ("Manage contexts: add, rename, delete, reorder", "L", "manage_contexts"),
-            *((f"Go to {sec.value}", "tab / ⇧tab", f"go({n})") for n, sec in enumerate(LIST_ORDER)),
+            *((f"Go to {TAB_NAMES[sec] if sec == FOCUS else sec.value}", "tab / ⇧tab", f"go({n})")
+              for n, sec in enumerate(self.tab_order())),
             ("Clear ticked items", "", "clear_ticked"),
             ("Clear proposals from In", "", "clear_proposals"),
             *self.area_entries(),
@@ -1222,7 +1289,12 @@ class GTDApp(App):
             await self.change(lambda d: saved.append(model.defer(d, None, text, None, slug, self.today)), area)
             return saved[0]
         area = self.view_areas[0] if len(self.view_areas) == 1 else self.capture_area
-        await self.change(lambda d: saved.append(model.capture(d, text, self.today)), area)
+        star = self.today if self.current == FOCUS else None  # captured on Focus: starred
+
+        def add(d):
+            saved.append(item := model.capture(d, text, self.today))
+            item.star = star
+        await self.change(add, area)
         return saved[0]
 
     # 2. Clarify: the processing workflow diagram
@@ -1296,6 +1368,7 @@ class GTDApp(App):
 
     def apply_clarify(self, d: model.Doc, a: dict, src: model.Item | None) -> None:
         keep_every = src.every if src is not None else None
+        keep_star = src.star if src is not None else None
         if a.get("actionable") is False:
             if a["dest"] is None:
                 model.trash(d, src)
@@ -1316,6 +1389,8 @@ class GTDApp(App):
             made = model.delegate(d, src, a["action"], a["who"], slug, self.today, a.get("due"), a.get("start"))
         if made is not None and keep_every:
             made.every = keep_every  # re-clarifying a recurring item keeps it recurring
+        if made is not None and keep_star:
+            made.star = keep_star    # and a starred one stays on Focus
         for task in a.get("extra_tasks") or []:  # further tasks captured into the project
             model.defer(d, None, task, None, slug, self.today)
 
@@ -1366,12 +1441,17 @@ class GTDApp(App):
         section = self.section_of(self.selected()) if self.selected() else self.current
         if entry := self.selected_ticked():
             done_item, pos = entry
+            if section == FOCUS:  # back to the list it came from
+                section = self.focus_origin.get(done_item.line(), model.reopen_target(done_item))
             if section is not Section.DONE and any(done_item is i for i in self.doc.items(section)):
                 # ticked in Obsidian and not yet filed: untick it where it is
                 locate = self.on_disk(section, done_item)
                 await self.change(lambda d: (it := locate(d)) and setattr(it, "done", False), done_item.area)
                 return self.toast(f"Unticked “{done_item.text}”")
-            self.ticked[section].remove(entry)
+            if self.current == FOCUS:
+                self.ticked[FOCUS].remove(entry)
+            else:
+                self.ticked[section].remove(entry)
             locate = self.on_disk(Section.DONE, done_item)
             await self.change(lambda d: (it := locate(d)) and model.uncomplete(d, it, section, pos), done_item.area)
             return self.toast(f"Unticked “{done_item.text}”")
@@ -1390,6 +1470,9 @@ class GTDApp(App):
             if (it := locate(d)) is not None:
                 if (was := model.complete(d, it, self.today)) is not None:
                     rolled.append((it, was))  # recurring: it stays, with its due date rolled forward
+                elif self.current == FOCUS:
+                    self.ticked.setdefault(FOCUS, []).append((it, pos))
+                    self.focus_origin[it.line()] = section
                 else:
                     self.ticked.setdefault(section, []).append((it, pos))
         await self.change(tick, item.area)
@@ -1413,13 +1496,13 @@ class GTDApp(App):
     async def action_delete(self) -> None:
         """Delete the marked rows as one change (one z restores them all), else the highlighted one."""
         if self.marked:
-            marked, section = set(self.marked), self.current
+            marked = set(self.marked)
             self.marked.clear()
 
-            def drop(area):
+            def drop(area):  # from whichever list holds each row (Focus and project pages mix lists)
                 lines = {line for a, line in marked if a == area}
-                return lambda d: d.sections.__setitem__(
-                    section.value, [i for i in d.items(section) if i.line() not in lines])
+                return lambda d: [d.sections.__setitem__(sec.value, [i for i in d.items(sec) if i.line() not in lines])
+                                  for sec in Section if sec is not Section.DONE or self.current is Section.DONE]
             await self.change_each({area: drop(area) for area in {a for a, _ in marked}})
             return self.toast(f"Deleted {len(marked)} item{'s' if len(marked) != 1 else ''}")
         if item := self.selected():
@@ -1442,10 +1525,30 @@ class GTDApp(App):
     def later_count(self) -> int:
         return sum(model.starts_later(i, self.today) for s in Section for i in self.doc.items(s))
 
+    async def action_star(self) -> None:
+        """s: star the marked rows or the highlighted one for Focus; on starred ones, unstar."""
+        items = [i for i in self.shown if (i.area, i.line()) in self.marked] or \
+            ([self.selected()] if self.selected() else [])
+        if not items:
+            return
+        star = None if all(i.star for i in items) else self.today
+        fns: dict = {}
+        for item in items:
+            locate = self.on_disk(self.section_of(item), item)
+            fns.setdefault(item.area, []).append(locate)
+
+        def apply(locates):
+            return lambda d: [setattr(it, "star", star if not it.star or not star else it.star)
+                              for it in (loc(d) for loc in locates) if it is not None]
+        self.marked.clear()
+        await self.change_each({area: apply(locates) for area, locates in fns.items()})
+        what = f"“{items[0].text}”" if len(items) == 1 else f"{len(items)} items"
+        self.toast(f"Starred {what} for Focus" if star else f"Unstarred {what}")
+
     async def action_toggle_later(self) -> None:
         self.show_later = not self.show_later
         await self.render_lists()
-        self.notify("Showing tasks that start later." if self.show_later else "Hiding tasks that start later.")
+        self.notify("Showing deferred tasks." if self.show_later else "Hiding deferred tasks.")
 
     def context_choices(self) -> list[str]:
         """The configured contexts in their order, then any others already in use."""
@@ -1645,7 +1748,7 @@ class GTDApp(App):
 
     async def jump_to(self, section: Section, line: str) -> None:
         """Open a list with the given item highlighted (used by / search)."""
-        await self.action_go(LIST_ORDER.index(section))
+        await self.action_go(self.tab_order().index(section))
         if (row := self.row_of(line)) is not None:
             self.query_one("#items", ItemList).highlighted = row
 

@@ -164,3 +164,11 @@ def test_rename_context_renames_and_removes():
     assert [i.context for i in doc.items(Section.NEXT)] == ["@phone @home", "@home"]
     assert model.rename_context(doc, "@home", None) == 2
     assert [i.context for i in doc.items(Section.NEXT)] == ["@phone", None]
+
+
+def test_ticking_a_recurring_item_clears_its_star():
+    from gtd import store
+    doc = store.parse("<!-- gtd v1 -->\n\n## Next Actions\n- [ ] Pay rent every:monthly due:2026-10-01 star:2026-10-01\n")
+    item = doc.items(Section.NEXT)[0]
+    model.complete(doc, item, date(2026, 10, 1))
+    assert item.star is None and str(item.due) == "2026-11-01"

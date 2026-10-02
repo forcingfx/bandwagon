@@ -869,7 +869,7 @@ def test_tasks_starting_later_are_hidden_until_toggled(tmp_path):
     assert [i.text for i in app.shown] == ["Water plants", "No start at all"]
     assert "1 starting later" in app.status_text
     assert " Next 2 " in app.tabs_text().plain
-    app = run(path, "tab", "s")
+    app = run(path, "tab", "d")
     assert [i.text for i in app.shown] == ["Clean the drum", "Water plants", "No start at all"]
     assert "starts Oct 2" in app.describe(app.shown[0], set()).plain
 
@@ -912,11 +912,11 @@ def test_row_is_action_then_named_chips_in_a_fixed_order(tmp_path):
 def test_d_sets_due_and_start_dates(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text("<!-- gtd v1 -->\n\n## In\n- [ ] Renew passport\n")
-    app = run(path, "down", "d", T("2026-10-20"), T("-3d"))
+    app = run(path, "down", "h", T("2026-10-20"), T("-3d"))
     item = store.load(path).items(Section.IN)[0]
     assert (str(item.due), str(item.start)) == ("2026-10-20", "2026-10-17")
     assert app.last_toast.startswith("Renew passport: due Oct 20 · starts Oct 17 (hidden until then)")
-    run(path, "s", "down", "d", "ctrl+u", "tab", "ctrl+u", "enter")   # s: it starts later, so show it; clear both
+    run(path, "d", "down", "h", "ctrl+u", "tab", "ctrl+u", "enter")   # d: it starts later, so show it; clear both
     item = store.load(path).items(Section.IN)[0]
     assert (item.due, item.start) == (None, None)
 
@@ -935,7 +935,7 @@ def next_item(path):
 def test_date_screen_number_enter_sets_due_then_enter_skips_start(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(ONE_IN)
-    run(path, "down", "d", "2", "enter", "enter")          # due: in 2 days (Oct 1 from Tue Sep 29); start: no date
+    run(path, "down", "h", "2", "enter", "enter")          # due: in 2 days (Oct 1 from Tue Sep 29); start: no date
     item = store.load(path).items(Section.IN)[0]
     assert (str(item.due), item.start) == ("2026-10-01", None)
 
@@ -943,7 +943,7 @@ def test_date_screen_number_enter_sets_due_then_enter_skips_start(tmp_path):
 def test_date_screen_arrows_pick_a_suggestion_and_tab_moves_to_start(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(ONE_IN)
-    run(path, "down", "d", "2", "down", "enter", "-", "3", "enter")   # in 2 weekdays (Oct 1)… 2nd row = in 2 weeks
+    run(path, "down", "h", "2", "down", "enter", "-", "3", "enter")   # in 2 weekdays (Oct 1)… 2nd row = in 2 weeks
     item = store.load(path).items(Section.IN)[0]
     assert (str(item.due), str(item.start)) == ("2026-10-13", "2026-10-10")
 
@@ -951,7 +951,7 @@ def test_date_screen_arrows_pick_a_suggestion_and_tab_moves_to_start(tmp_path):
 def test_date_screen_enter_on_empty_due_skips_everything(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(ONE_IN)
-    run(path, "down", "d", "2", "enter", "escape")   # Esc leaves the card unchanged
+    run(path, "down", "h", "2", "enter", "escape")   # Esc leaves the card unchanged
     item = store.load(path).items(Section.IN)[0]
     assert (item.due, item.start) == (None, None)
 
@@ -959,7 +959,7 @@ def test_date_screen_enter_on_empty_due_skips_everything(tmp_path):
 def test_date_screen_tab_goes_straight_to_start(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(ONE_IN)
-    run(path, "down", "d", "tab", "f", "r", "i", "enter")     # start only: Friday Oct 2
+    run(path, "down", "h", "tab", "f", "r", "i", "enter")     # start only: Friday Oct 2
     item = store.load(path).items(Section.IN)[0]
     assert (item.due, str(item.start)) == (None, "2026-10-02")
 
@@ -1264,3 +1264,75 @@ def test_palette_separates_commands_and_tasks_with_a_key_column(tmp_path):
 def test_empty_palette_groups_commands(tmp_path):
     rows, _ = palette_rows(tmp_path / "gtd.md")
     assert [text.strip() for disabled, text in rows if disabled] == ["DO", "EDIT ITEM", "LISTS & VIEWS", "SETTINGS"]
+
+
+FOCUS_DOC = ("<!-- gtd v1 -->\n\n## In\n- [ ] Loose idea\n\n## Next Actions\n- [ ] Call Fred @calls\n"
+             "- [ ] Draft memo @computer\n\n## Waiting For\n- [ ] Brief from Mike waiting:mike\n")
+
+
+def test_s_stars_and_focus_tab_appears_after_in(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text(FOCUS_DOC)
+    app = run(path)
+    assert "Focus" not in app.tabs_text().plain                   # hidden while nothing is starred
+    app = run(path, "right", "down", "s")                          # Next → Draft memo → star
+    assert str(store.load(path).items(Section.NEXT)[1].star) == "2026-09-29"
+    tabs = app.tabs_text().plain
+    assert tabs.index("In") < tabs.index("Focus") < tabs.index("Next")
+
+
+def test_focus_lists_starred_items_from_every_list(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text(FOCUS_DOC.replace("@computer", "@computer star:2026-09-28")
+                    .replace("waiting:mike", "waiting:mike star:2026-09-29"))
+    app = run(path, "right")                                       # In → Focus
+    assert app.current == "focus" and [i.text for i in app.shown] == ["Draft memo", "Brief from Mike"]
+
+
+def test_ticking_on_focus_and_unticking_puts_it_back_starred(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text(FOCUS_DOC.replace("@computer", "@computer star:2026-09-28"))
+    run(path, "right", "space")
+    assert [i.text for i in store.load(path).items(Section.DONE)] == ["Draft memo"]
+    path.write_text(FOCUS_DOC.replace("@computer", "@computer star:2026-09-28"))
+    run(path, "right", "space", "down", "space")                   # tick, then untick from the ticked section
+    doc = store.load(path)
+    assert doc.items(Section.DONE) == [] and doc.items(Section.NEXT)[1].star is not None
+
+
+def test_s_again_unstars(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text(FOCUS_DOC.replace("@computer", "@computer star:2026-09-28"))
+    run(path, "right", "s")
+    assert store.load(path).items(Section.NEXT)[1].star is None
+
+
+def test_capture_on_focus_is_starred(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text(FOCUS_DOC.replace("@computer", "@computer star:2026-09-28"))
+    run(path, "right", "a", T("Buy stamps"))
+    assert store.load(path).items(Section.IN)[-1].star is not None
+
+
+def test_d_toggles_later_and_h_sets_dates(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text(FOCUS_DOC)
+    assert run(path, "d").show_later is True
+    run(path, "right", "h", *"dec 5", "enter", "enter")
+    assert str(store.load(path).items(Section.NEXT)[0].due) == "2026-12-05"
+
+
+def test_key_hints_colour_the_keys(tmp_path):
+    from gtd.app import hint_content, COUNT_COLOUR
+    content = hint_content("a capture · ← → lists · space tick")
+    keyed = {content.plain[s.start:s.end] for s in content.spans if COUNT_COLOUR in str(s.style)}
+    assert keyed == {"a", "← →", "space"}
+
+
+def test_bulk_delete_on_focus_removes_rows_from_their_own_lists(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text(FOCUS_DOC.replace("@computer", "@computer star:2026-09-28")
+                    .replace("waiting:mike", "waiting:mike star:2026-09-29"))
+    run(path, "right", "x", "down", "x", "backspace")
+    doc = store.load(path)
+    assert [i.text for i in doc.items(Section.NEXT)] == ["Call Fred"] and doc.items(Section.WAITING) == []

@@ -126,3 +126,9 @@ def test_concurrent_mutates_never_lose_a_change(tmp_path):
     for t in threads:
         t.join()
     assert len(store.load(path).items(Section.IN)) == 8
+
+
+def test_star_round_trips_as_a_date_tag():
+    line = "- [ ] Draft memo @computer +maps added:2026-10-01 star:2026-10-02"
+    item = store.parse_item(line)
+    assert str(item.star) == "2026-10-02" and item.added and item.line() == line
