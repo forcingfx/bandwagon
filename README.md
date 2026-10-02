@@ -11,7 +11,7 @@ A terminal task app built on David Allen's *Getting Things Done*. It serves both
   - The Project and Context rows (`m`, `l`, and the clarify card) are search boxes: type to narrow, `↑ ↓` move, `Enter` takes, and the last row creates a new one from the words typed. Digits pick by number while the box is empty; on Context, `Space` ticks several and "Edit the list…" opens the editor.
 - **Automation uses the same command.**
   - `gtd add`, `gtd propose`, `gtd done`, `gtd find`, `gtd list`, `gtd expire` and `gtd sweep`.
-  - `gtd --help` describes each one, and `gtd --file <path>` works on a single file.
+  - `gtd --help` (or `gtd help`) lists them by goal with examples, `gtd help <command>` shows one, and `gtd --file <path>` works on a single file. The text lives in `gtd/helptext.py`.
   - `gtd find` matches every word in any order, in the text or the tags (`+project`, `@context`, a person, `waiting:name`). In a terminal it opens an inline picker over the open matches: `Space` ticks, `s` stars, `/` or `Tab` edits the words, `Esc` quits. `gtd done` opens the same picker when its words match several open items, and refuses when they match none.
   - Without a terminal (scripts, skills) both print or refuse as before and never prompt.
   - Scripts and skills never edit `gtd.md` by hand, so every write goes through one parser and one atomic write.

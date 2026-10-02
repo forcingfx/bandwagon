@@ -183,3 +183,75 @@ def test_save_contexts_rewrites_only_that_line(tmp_path):
     bare.write_text('[areas.work]\nfile = "w.md"\n')
     config.save_contexts(["@calls"], bare)
     assert config.contexts(bare) == ["@calls"] and config.load(bare)[0]["work"].file.name == "w.md"
+
+
+# Help: never acts, fits 80 columns, everyday first, examples, where the docs live
+
+HELP_FORMS = [["--help"], ["-h"], ["help"]]
+SUBCOMMANDS = ["add", "propose", "done", "find", "list", "expire", "sweep"]
+
+
+@pytest.fixture
+def no_side_effects(monkeypatch, tmp_path):
+    """Help must not read the config, touch a file or open the app."""
+    def refuse(*a, **k):
+        raise AssertionError("help loaded the config")
+    monkeypatch.setattr(config, "load", refuse)
+    monkeypatch.setattr(config, "single", refuse)
+    monkeypatch.setattr(store, "mutate", refuse)
+    monkeypatch.chdir(tmp_path)
+    yield tmp_path
+    assert list(tmp_path.iterdir()) == []
+
+
+def run_help(argv, capsys) -> str:
+    with pytest.raises(SystemExit) as exit_:
+        cli.main(argv, today=TODAY)
+    assert exit_.value.code in (0, None)
+    out = capsys.readouterr()
+    assert out.err == ""
+    return out.out
+
+
+def assert_readable(text: str, max_lines: int | None = None) -> None:
+    assert text.isascii(), [ln for ln in text.splitlines() if not ln.isascii()]
+    wide = [ln for ln in text.splitlines() if len(ln) > 80]
+    assert wide == []
+    if max_lines:
+        assert len(text.splitlines()) <= max_lines
+
+
+@pytest.mark.parametrize("argv", HELP_FORMS)
+def test_top_help_is_grouped_with_examples_and_docs(argv, capsys, no_side_effects, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "200")
+    out = run_help(argv, capsys)
+    assert_readable(out, max_lines=40)
+    lines = out.splitlines()
+    assert "task" in lines[0].lower()
+    assert lines.index("Everyday") < lines.index("Automation (for scripts, skills and timers)")
+    assert "Examples" in lines
+    assert "README.md" in lines[-1]
+    for name in SUBCOMMANDS:
+        assert f"gtd {name}" in out
+    assert "?" in out  # how to find the app's own keys
+
+
+def test_help_forms_print_the_same_text(capsys, no_side_effects):
+    assert run_help(["--help"], capsys) == run_help(["-h"], capsys) == run_help(["help"], capsys)
+
+
+@pytest.mark.parametrize("name", SUBCOMMANDS)
+def test_command_help_fits_and_has_an_example(name, capsys, no_side_effects, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "200")
+    out = run_help([name, "--help"], capsys)
+    assert_readable(out)
+    assert out.startswith(f"usage: gtd {name}")
+    assert "Example" in out
+    assert run_help(["help", name], capsys) == out
+
+
+def test_help_with_an_unknown_command_says_so(capsys, no_side_effects):
+    with pytest.raises(SystemExit) as exit_:
+        cli.main(["help", "frobnicate"], today=TODAY)
+    assert exit_.value.code == 2
+    assert "frobnicate" in capsys.readouterr().err

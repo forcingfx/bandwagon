@@ -25,7 +25,7 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
-from . import config, dates, model, store
+from . import config, dates, helptext, model, store
 from .model import Section
 
 SECTIONS = {s.name.lower(): s for s in Section} | {s.value.lower(): s for s in Section}
@@ -229,14 +229,13 @@ def tag_flags(p) -> None:
     p.add_argument("--context", action="append", help="e.g. @calls; repeat or comma-separate for several")
     p.add_argument("--project", help="project slug, without +")
     p.add_argument("--waiting", help="who it is waiting on")
-    p.add_argument("--every", help="recurrence: daily, weekly, monthly, yearly, N-weeks …")
-    p.add_argument("--due", help="YYYY-MM-DD")
-    p.add_argument("--start", help="YYYY-MM-DD: hidden in the app until then")
+    p.add_argument("--every", help="repeat: daily, weekly, monthly, yearly, 2-weeks")
+    p.add_argument("--due", help="due date: 2026-10-05, fri, 3d, dec 5")
+    p.add_argument("--start", help="hide in the app until this date (same forms)")
 
 
 def main(argv: list[str] | None = None, today: date | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="gtd", description="GTD app and automation CLI. "
-                                     "Run with no command to open the app.")
+    parser = helptext.parser()
     parser.add_argument("--file", type=Path, help="work on one file instead of the configured areas")
     sub = parser.add_subparsers(dest="command")
     p = sub.add_parser("add", help="capture to In (or --section)")
@@ -261,7 +260,8 @@ def main(argv: list[str] | None = None, today: date | None = None) -> None:
     p.add_argument("--area")
     p = sub.add_parser("sweep", help="file checkboxes ticked in Obsidian")
     p.add_argument("--area")
-    args = parser.parse_args(argv)
+    helptext.finish(sub)
+    args = parser.parse_args(helptext.expand(sys.argv[1:] if argv is None else argv))
     today = today or date.today()
 
     if args.file:
