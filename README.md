@@ -3,7 +3,8 @@
 A terminal task app built on David Allen's *Getting Things Done*. It serves both vaults: `~/mindpalace/gtd.md` (work) and `~/homepalace/gtd.md` (home). The design records live in `~/mindpalace/system/docs/gtd-app-design.md` and `gtd-migration-design.md`.
 
 - **Open the app with `gtd`.** Press `?` for every key and `/` to search tasks and commands.
-  - `c` clarifies In, or re-clarifies any item on one card; `m` project, `l` context, `d` dates and `p` waiting-for change one field.
+  - `c` clarifies In, or re-clarifies any item on one card; `m` project, `l` context, `h` dates and `p` waiting-for change one field.
+  - `s` stars an item, and starred items gather on the Focus tab after In; `d` shows deferred tasks.
   - `v` cycles the vault view (work, home, both), `Enter` on a project opens its page, and `L` edits the contexts.
 - **Automation uses the same command.**
   - `gtd add`, `gtd propose`, `gtd done`, `gtd find`, `gtd list`, `gtd expire` and `gtd sweep`.
