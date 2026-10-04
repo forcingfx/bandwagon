@@ -42,6 +42,71 @@ def test_propose_cap_parks_overflow(areas):
     assert cli.cmd_propose(areas, "work", "Tomorrow", "process", date(2026, 9, 30)).startswith("Proposed")
 
 
+def proposed(areas, n, caller=None, day=TODAY):
+    """Propose n times; how many landed in In rather than overflow."""
+    return sum(cli.cmd_propose(areas, "work", f"{caller or 'anon'} {day} {i}", "process", day, caller=caller)
+               .startswith("Proposed") for i in range(n))
+
+
+def test_reserve_keeps_slots_for_its_caller(areas):
+    areas["work"].proposal_cap, areas["work"].proposal_reserve = 5, {"process": 3}
+    assert proposed(areas, 4, "tick") == 2          # the 17:00 tick cannot spend the evening's slots
+    msg = cli.cmd_propose(areas, "work", "One more", "inbox", TODAY, caller="tick")
+    assert msg == "cap: 2 of 5 proposals made today and the other 3 reserved for process; parked to overflow"
+    assert "- 2026-09-29 One more [source](inbox)" in (areas["work"].state_dir / "task-overflow.md").read_text()
+    assert proposed(areas, 4, "process") == 3       # the reserve, and the cap still holds
+    assert cli.cmd_propose(areas, "work", "Late", "process", TODAY, caller="process") == (
+        "cap: 5 proposals already made today; parked to overflow")
+    assert json.loads((areas["work"].state_dir / "gtd-proposals.json").read_text()) == {
+        "2026-09-29": {"tick": 2, "process": 3}}
+
+
+def test_reserved_caller_takes_what_remains_of_the_full_cap(areas):
+    areas["work"].proposal_cap, areas["work"].proposal_reserve = 5, {"process": 3}
+    assert proposed(areas, 6, "process") == 5       # nobody else proposed: all five
+    day = date(2026, 9, 30)
+    assert proposed(areas, 1, "tick", day) == 1
+    assert proposed(areas, 6, "process", day) == 4  # what the tick left
+    assert proposed(areas, 1, "tick", day) == 0
+
+
+def test_no_caller_is_capped_as_before_minus_the_reserve(areas):
+    areas["work"].proposal_cap, areas["work"].proposal_reserve = 5, {"process": 3}
+    assert proposed(areas, 4) == 2                  # no caller named: the unreserved slots only
+    assert proposed(areas, 1, "process") == 1
+    assert proposed(areas, 1) == 0                  # process still holds two
+    areas["work"].proposal_reserve = {}
+    assert proposed(areas, 9, day=date(2026, 9, 30)) == 5   # no reserve: exactly the old cap
+
+
+def test_reserve_counts_on_from_a_bare_number_in_the_counts_file(areas):
+    areas["work"].proposal_cap, areas["work"].proposal_reserve = 5, {"process": 3}
+    counts = areas["work"].state_dir / "gtd-proposals.json"
+    counts.write_text('{"2026-09-29": 2}\n')        # the format before callers were counted
+    assert proposed(areas, 1, "tick") == 0
+    assert proposed(areas, 4, "process") == 3
+    assert json.loads(counts.read_text()) == {"2026-09-29": {"": 2, "process": 3}}
+
+
+def test_caller_comes_from_the_flag_or_the_environment(tmp_path, monkeypatch, capsys):
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(f'[areas.work]\nfile = "{tmp_path / "w.md"}"\nstate_dir = "{tmp_path}"\n'
+                   'proposal_cap = 2\nproposal_reserve = { process = 1 }\n')
+    loaded = config.load(cfg)
+    assert loaded[0]["work"].proposal_reserve == {"process": 1}
+    monkeypatch.setattr(config, "load", lambda: loaded)
+    monkeypatch.delenv("GTD_CALLER", raising=False)
+    cli.main(["propose", "A", "--src", "inbox"], today=TODAY)
+    cli.main(["propose", "B", "--src", "inbox"], today=TODAY)
+    monkeypatch.setenv("GTD_CALLER", "process")
+    cli.main(["propose", "C", "--src", "inbox"], today=TODAY)
+    monkeypatch.setenv("GTD_CALLER", "tick")
+    cli.main(["propose", "D", "--src", "inbox", "--caller", "process"], today=TODAY)
+    out = capsys.readouterr().out.splitlines()
+    assert [ln.split(":")[0] for ln in out] == ["Proposed to work In", "cap", "Proposed to work In", "cap"]
+    assert json.loads((tmp_path / "gtd-proposals.json").read_text()) == {"2026-09-29": {"": 1, "process": 1}}
+
+
 def test_done_ticks_one_match_and_rolls_recurring_with_log(areas):
     assert cli.cmd_done(areas, "rent", TODAY) == "Ticked in home: Pay rent (next due 2026-11-01)"
     assert "| 2026-09-29 | Pay rent | 2026-10-01 | monthly |" in areas["home"].completions_log.read_text()

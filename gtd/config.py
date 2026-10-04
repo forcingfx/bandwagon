@@ -7,6 +7,7 @@
     file = "~/mindpalace/gtd.md"
     state_dir = "~/mindpalace/system/state"    # proposal counts, overflow, expired log
     proposal_cap = 5                           # automated proposals per day; omit for no cap
+    proposal_reserve = { process = 3 }         # slots of the cap kept for one caller (propose --caller)
 
     [areas.home]
     file = "~/homepalace/gtd.md"
@@ -16,7 +17,7 @@ from __future__ import annotations
 
 import os
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 CONFIG = Path(os.environ.get("GTD_CONFIG", "~/.config/gtd/config.toml")).expanduser()
@@ -29,6 +30,7 @@ class Area:
     state_dir: Path | None = None
     completions_log: Path | None = None
     proposal_cap: int | None = None
+    proposal_reserve: dict[str, int] = field(default_factory=dict)
 
 
 def _path(value: str | None) -> Path | None:
@@ -40,7 +42,8 @@ def load(path: Path = CONFIG) -> tuple[dict[str, Area], str]:
     data = tomllib.loads(path.read_text()) if path.exists() else {}
     areas = {
         name: Area(name, _path(spec["file"]), _path(spec.get("state_dir")),
-                   _path(spec.get("completions_log")), spec.get("proposal_cap"))
+                   _path(spec.get("completions_log")), spec.get("proposal_cap"),
+                   dict(spec.get("proposal_reserve", {})))
         for name, spec in data.get("areas", {}).items()
     }
     if not areas:

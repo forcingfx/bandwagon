@@ -14,6 +14,7 @@ A terminal task app built on David Allen's *Getting Things Done*. It serves both
   - `gtd --help` (or `gtd help`) lists them by goal with examples, `gtd help <command>` shows one, and `gtd --file <path>` works on a single file. The text lives in `gtd/helptext.py`.
   - `gtd find` matches every word in any order, in the text or the tags (`+project`, `@context`, a person, `waiting:name`). In a terminal it opens an inline picker over the open matches: `Space` ticks, `s` stars, `/` or `Tab` edits the words, `Esc` quits. `gtd done` opens the same picker when its words match several open items, and refuses when they match none.
   - Without a terminal (scripts, skills) both print or refuse as before and never prompt.
+  - `gtd propose` stops at the area's `proposal_cap` a day and parks the rest in `task-overflow.md`. `proposal_reserve = { process = 3 }` keeps three of those slots for the caller named `process`: a caller says who it is with `--caller NAME` or `$GTD_CALLER`, and any other caller, or none, gets only the slots nobody else has reserved. The day's counts per caller are in `gtd-proposals.json` in the area's `state_dir`.
   - Scripts and skills never edit `gtd.md` by hand, so every write goes through one parser and one atomic write.
 - **Areas are listed in `~/.config/gtd/config.toml`.** The format is documented at the top of `gtd/config.py`, and the contexts editor (`L`) rewrites only the `contexts = [...]` line.
 - **Run the tests with `.venv/bin/pytest gtd -q`.**

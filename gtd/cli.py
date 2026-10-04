@@ -3,9 +3,10 @@ commands, never by hand, so every write goes through the parser and the atomic w
 
     gtd                                   open the app
     gtd add "text" [--area home]          capture to In
-    gtd propose "text" --src URL [--area work]
+    gtd propose "text" --src URL [--area work] [--caller process]
                                           an automated proposal; capped per day where the
-                                          area sets proposal_cap, extras parked in overflow
+                                          area sets proposal_cap, extras parked in overflow;
+                                          proposal_reserve keeps slots of the cap for a caller
     gtd done "title words"                tick the one open item matching (recurring: roll);
                                           in a terminal, several matches open a picker
     gtd find "words"                      show matching items, open and done, in every area
@@ -21,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -113,20 +115,29 @@ def cmd_add(areas, area: str, text: str, today: date, section: str | None = None
     return f"Captured to {area} {where.value}: {item.text}"
 
 
-def cmd_propose(areas, area: str, text: str, src: str, today: date, **tags) -> str:
-    spec = areas[area]
+def cmd_propose(areas, area: str, text: str, src: str, today: date, caller: str | None = None, **tags) -> str:
+    spec, caller = areas[area], caller or ""
     if spec.proposal_cap is not None and spec.state_dir:
         counts_file = spec.state_dir / "gtd-proposals.json"
         counts = json.loads(counts_file.read_text()) if counts_file.exists() else {}
-        made = counts.get(str(today), 0)
-        if made >= spec.proposal_cap:
+        by = counts.get(str(today), {})
+        by = dict(by) if isinstance(by, dict) else {"": by}  # a bare number: written before callers were counted
+        made = sum(by.values())
+        # Slots other callers have reserved and not used yet are closed to this one.
+        held = sum(max(0, n - by.get(name, 0)) for name, n in spec.proposal_reserve.items() if name != caller)
+        if made + held >= spec.proposal_cap:
             append_log(spec.state_dir / "task-overflow.md", today, OVERFLOW_KEEP_DAYS,
                        ["# Task overflow", "",
                         "<!-- Written by `gtd propose`. Proposals past the daily cap. Not tasks. "
                         "Re-propose one tomorrow or capture it by hand; lines older than 7 days drop. -->", ""],
                        [f"- {today} {text} [source]({src})"])
-            return f"cap: {spec.proposal_cap} proposals already made today; parked to overflow"
-        store.write_text(counts_file, json.dumps({str(today): made + 1}) + "\n")
+            if made >= spec.proposal_cap:
+                return f"cap: {spec.proposal_cap} proposals already made today; parked to overflow"
+            keepers = ", ".join(name for name in spec.proposal_reserve if name != caller)
+            return (f"cap: {made} of {spec.proposal_cap} proposals made today and the other {held} "
+                    f"reserved for {keepers}; parked to overflow")
+        by[caller] = by.get(caller, 0) + 1
+        store.write_text(counts_file, json.dumps({str(today): by}) + "\n")
     item = build_item(text, today, src=src, **tags)
     store.mutate(spec.file, lambda d: d.items(Section.IN).append(item), today)
     return f"Proposed to {area} In: {item.text}"
@@ -247,6 +258,7 @@ def main(argv: list[str] | None = None, today: date | None = None) -> None:
     p.add_argument("text", nargs="+")
     p.add_argument("--src", required=True)
     p.add_argument("--area")
+    p.add_argument("--caller", help="who is proposing (default: $GTD_CALLER), for the area's proposal_reserve")
     tag_flags(p)
     p = sub.add_parser("done", help="tick the one open item matching; a picker in a terminal when several")
     p.add_argument("words", nargs="+")
@@ -276,7 +288,8 @@ def main(argv: list[str] | None = None, today: date | None = None) -> None:
     if args.command == "add":
         print(cmd_add(areas, area, " ".join(args.text), today, section=args.section, **tags))
     elif args.command == "propose":
-        print(cmd_propose(areas, area, " ".join(args.text), args.src, today, **tags))
+        print(cmd_propose(areas, area, " ".join(args.text), args.src, today,
+                          caller=args.caller or os.environ.get("GTD_CALLER"), **tags))
     elif args.command == "done":
         picker = None
         if interactive():

@@ -56,7 +56,8 @@ COMMANDS = {
             '      Captured to work Next Actions: Draft offsite agenda'),
     "propose": ("Suggest a task to In from a script or skill, with a link to where it\n"
                 "came from. Past the area's daily cap, extras are parked in\n"
-                "task-overflow.md instead of In.",
+                "task-overflow.md instead of In. --caller NAME (or $GTD_CALLER) says who\n"
+                "is proposing; slots the config reserves for another caller stay closed.",
                 'Example:\n'
                 '  gtd propose "Reply to Ben re hiring" --src https://x.slack.com/archives/1\n'
                 '      Proposed to work In: Reply to Ben re hiring'),
