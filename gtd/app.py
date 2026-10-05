@@ -1364,10 +1364,11 @@ class GTDApp(App):
         item = self.selected()
         here = self.section_of(item) if item is not None else self.current
         if here is Section.PROJECTS and item is not None:
-            await self.clarify(item, None, "tasks", existing=item.project, locked_project=True, kind="addto")
+            await self.clarify(item, None, "tasks",
+                               {"existing": item.project, "locked_project": True, "kind": "addto"})
             return await self.show(here)
         if (here is not Section.IN or self.project_view) and item is not None:
-            await self.clarify(item, here, "what", **prefill_from_item(item, here))
+            await self.clarify(item, here, "what", prefill_from_item(item, here))
             return await self.render_lists() if self.project_view else await self.show(here)
         first = item if here is Section.IN else None
         await self.show(Section.IN)
@@ -1402,9 +1403,10 @@ class GTDApp(App):
         return self.project_title(model.Item(text="", project=slug, area=area))
 
     async def clarify(self, item: model.Item, source: Section | None = Section.IN,
-                      start: str = "what", **preset) -> bool:
-        """Run the clarify card for one item and apply the answers. False if Arjun backed out."""
-        a = await self.push_screen_wait(self.card(item, start=start, preset=preset))
+                      start: str = "what", preset: dict | None = None) -> bool:
+        """Run the clarify card for one item and apply the answers. False if Arjun backed out.
+        preset is a dict, not **kwargs: its answer names (start, due, …) would collide."""
+        a = await self.push_screen_wait(self.card(item, start=start, preset=preset or {}))
         if a is None:
             return False
         locate = self.on_disk(source, item) if source else (lambda d: None)

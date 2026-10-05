@@ -1141,6 +1141,16 @@ def test_reclarify_moves_a_next_action_to_waiting_for(tmp_path):
     assert doc.items(Section.NEXT) == []
 
 
+def test_reclarify_an_item_that_has_a_start_date(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text("<!-- gtd v1 -->\n\n## Next Actions\n"
+                    "- [ ] Budget numbers @computer start:2026-09-20 due:2026-10-01\n")
+    run(path, "right", "c", "1", "3", "ctrl+u", T("Maciej"), "enter", "enter")   # delegate; keep dates
+    [waiting] = store.load(path).items(Section.WAITING)      # start: is an answer name, not a card row
+    assert (waiting.text, str(waiting.start), str(waiting.due)) == \
+        ("Budget numbers", "2026-09-20", "2026-10-01")
+
+
 FIELD_FILE = ("<!-- gtd v1 -->\n\n## Next Actions\n- [ ] Draft agenda @calls\n\n"
               "## Projects\n- [ ] Maps relaunch +maps\n")
 
