@@ -14,7 +14,7 @@ from textual.app import App, ComposeResult
 from textual.fuzzy import Matcher
 from textual.binding import Binding
 from textual.content import Content
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.style import Style
 from textual.widgets import Input, OptionList, Static
@@ -22,7 +22,6 @@ from textual.widgets.option_list import Option
 
 from . import config, dates, model, store
 from .clarify import ClarifyScreen, prefill_from_item
-from .datescreen import DatePicker, DateScreen
 from .model import Section, task_matches
 
 LIST_ORDER = [Section.IN, Section.NEXT, Section.PROJECTS, Section.WAITING, Section.SOMEDAY, Section.DONE]

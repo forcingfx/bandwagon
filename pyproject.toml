@@ -1,0 +1,50 @@
+# Packaging for bandwagon: the import package and the command are both `gtd`.
+# `uv tool install git+https://github.com/forcingfx/bandwagon` puts `gtd` on PATH.
+[project]
+name = "bandwagon"
+description = "A terminal Getting Things Done app over one plain markdown task file per area, with a scripting CLI."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"   # tomllib; argparse's colour kwarg is guarded for 3.14+
+dependencies = ["textual>=8"]
+dynamic = ["version"]
+classifiers = [
+    "Environment :: Console",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",   # store.py locks with fcntl, so no Windows
+    "Programming Language :: Python :: 3",
+    "Topic :: Office/Business :: Scheduling",
+]
+
+[project.urls]
+Repository = "https://github.com/forcingfx/bandwagon"
+
+[project.scripts]
+gtd = "gtd.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "gtd/__init__.py"   # one source of truth; `gtd --version` reads the same string
+
+[tool.hatch.build.targets.wheel]
+packages = ["gtd"]   # distribution name differs from the package dir; tests/ stays out of the wheel
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 130
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]   # syntax errors, undefined names, unused imports; no style policing
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402", "E702"]   # tests set module state before importing, and pack short steps on one line

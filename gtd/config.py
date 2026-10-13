@@ -72,7 +72,7 @@ def save_contexts(names: list[str], path: Path = CONFIG) -> None:
     line = "contexts = [" + ", ".join(f'"{n}"' for n in names) + "]"
     text = path.read_text() if path.exists() else ""
     lines = text.splitlines()
-    at = next((n for n, l in enumerate(lines) if l.split("=")[0].strip() == "contexts" and "[" in l), None)
+    at = next((n for n, ln in enumerate(lines) if ln.split("=")[0].strip() == "contexts" and "[" in ln), None)
     if at is None:
         lines.insert(0, line)
     else:

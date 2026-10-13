@@ -20,7 +20,6 @@ commands, never by hand, so every write goes through the parser and the atomic w
 """
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import sys
