@@ -1431,3 +1431,19 @@ def test_every_pop_up_is_centred(tmp_path):
     seen = asyncio.run(go())
     assert set(seen) >= {"ClarifyScreen", "HelpScreen", "ContextsScreen", "CaptureScreen"}
     assert all(align == ("center", "middle") for align in seen.values()), seen
+
+
+def test_opening_a_link_never_crashes_when_the_desktop_tools_are_missing(monkeypatch):
+    from gtd import app as app_module
+    monkeypatch.setattr(app_module, "OPENER", ["gtd-no-such-opener"])
+    monkeypatch.setattr(app_module, "CLIPBOARD", ["gtd-no-such-clipboard"])
+    app_module.open_externally("https://example.com")   # falls back to the clipboard, then gives up quietly
+
+
+def test_opener_and_clipboard_match_the_platform():
+    import sys
+    from gtd import app as app_module
+    if sys.platform == "darwin":
+        assert app_module.OPENER == ["open"] and app_module.CLIPBOARD == ["pbcopy"]
+    else:
+        assert app_module.OPENER == ["xdg-open"] and app_module.CLIPBOARD == ["wl-copy"]

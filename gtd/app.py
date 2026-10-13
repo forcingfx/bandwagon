@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from datetime import date
 import hashlib
 from pathlib import Path
@@ -123,15 +124,29 @@ def follow_script(workspace: str | None) -> str | None:
 AREA_COLOURS = {"work": "#73d0ff", "home": "#bae67e"}   # the kitty palette's blue and green
 
 
+OPENER = ["open"] if sys.platform == "darwin" else ["xdg-open"]
+CLIPBOARD = ["pbcopy"] if sys.platform == "darwin" else ["wl-copy"]
+
+
+def copy_to_clipboard(text: str) -> bool:
+    """Put `text` on the clipboard; False when no clipboard tool is installed."""
+    try:
+        subprocess.run(CLIPBOARD, input=text.encode(), check=False, timeout=5)
+        return True
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def open_externally(url: str) -> None:
-    """Hand the link to the desktop (Obsidian, browser, Granola). An Obsidian note is pulled
-    to the current Sway workspace. If opening fails, the link goes to the clipboard."""
+    """Hand the link to the desktop (Obsidian, browser, Granola): `open` on macOS, `xdg-open`
+    elsewhere. Under Sway an Obsidian note is pulled to the current workspace. If opening
+    fails, the link goes to the clipboard instead."""
     workspace = focused_workspace() if url.startswith("obsidian://") else None
     try:
-        subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        subprocess.Popen(OPENER + [url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                          start_new_session=True)
     except OSError:
-        subprocess.run(["wl-copy", url], check=False)
+        copy_to_clipboard(url)
         return
     if script := follow_script(workspace):
         subprocess.Popen(["sh", "-c", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
