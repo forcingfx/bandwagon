@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from datetime import date
@@ -99,7 +100,7 @@ def hint_content(hints: str) -> Content:
 
 
 def focused_workspace() -> str | None:
-    """The Sway workspace Arjun is on, or None outside Sway."""
+    """The focused Sway workspace, or None outside Sway (any other desktop)."""
     try:
         out = subprocess.run(["swaymsg", "-t", "get_workspaces"], capture_output=True, text=True, timeout=2)
         return next((w["name"] for w in json.loads(out.stdout) if w.get("focused")), None)
@@ -124,7 +125,10 @@ AREA_COLOURS = {"work": "#73d0ff", "home": "#bae67e"}   # the kitty palette's bl
 
 
 OPENER = ["open"] if sys.platform == "darwin" else ["xdg-open"]
-CLIPBOARD = ["pbcopy"] if sys.platform == "darwin" else ["wl-copy"]
+# Wayland, then the two X11 tools; the first one installed wins. None installed: copying fails quietly.
+LINUX_CLIPBOARDS = [["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]]
+CLIPBOARD = (["pbcopy"] if sys.platform == "darwin"
+             else next((c for c in LINUX_CLIPBOARDS if shutil.which(c[0])), LINUX_CLIPBOARDS[0]))
 
 
 def copy_to_clipboard(text: str) -> bool:
@@ -137,9 +141,9 @@ def copy_to_clipboard(text: str) -> bool:
 
 
 def open_externally(url: str) -> None:
-    """Hand the link to the desktop (Obsidian, browser, Granola): `open` on macOS, `xdg-open`
-    elsewhere. Under Sway an Obsidian note is pulled to the current workspace. If opening
-    fails, the link goes to the clipboard instead."""
+    """Hand the link to the desktop: `open` on macOS, `xdg-open` elsewhere. Under Sway an
+    Obsidian note is also pulled to the current workspace. If opening fails, the link goes
+    to the clipboard instead."""
     workspace = focused_workspace() if url.startswith("obsidian://") else None
     try:
         subprocess.Popen(OPENER + [url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -153,7 +157,7 @@ def open_externally(url: str) -> None:
 
 
 def in_order(items: list) -> tuple[list, list]:
-    """Arjun's own items, then automated proposals (items with a source), each in file order."""
+    """Your own items, then automated proposals (items with a source), each in file order."""
     return [i for i in items if not i.src], [i for i in items if i.src]
 
 
@@ -798,7 +802,7 @@ class GTDApp(App):
             rows = [row for area in self.view_areas for row in
                     ([("header", area)] + [("item", i) for i in own if i.area == area]
                      if any(i.area == area for i in own) else [])]
-        if proposals:  # automated proposals sit below Arjun's own captures
+        if proposals:  # automated proposals sit below your own captures
             rows += [("divider", f"proposals · {len(proposals)}")] + [("item", i) for i in proposals]
         # Resolve ticked items against the file; drop any that left Done (undo, outside edit).
         done = {x.line(): x for x in self.doc.items(Section.DONE)}
@@ -999,7 +1003,7 @@ class GTDApp(App):
             parts += [self.link_part(label, project[1]) if project[1] else (label, "dim bold"), ("  ", "")]
         elif grouped and item.project:
             chips = [c for c in chips if c[0] != self.project_title(item)]
-        # Proposals (items with a source) are dimmed so Arjun's own captures stand out; link
+        # Proposals (items with a source) are dimmed so your own captures stand out; link
         # syntax is shown as its label, underlined, and o opens it.
         base = "strike dim" if item.done else "dim" if item.src else ""
         action, _ = model.split_trailing_links(item.text)
@@ -1323,7 +1327,7 @@ class GTDApp(App):
     # Helpers for flows
 
     async def ask(self, question: str, labels: list[str]) -> int | None:
-        """Returns the 1-based answer number, or None when Arjun goes back."""
+        """Returns the 1-based answer number, or None when you go back."""
         return await self.push_screen_wait(AskScreen(question, labels, self.header))
 
     async def text(self, prompt: str, value: str = "") -> str | None:
@@ -1394,7 +1398,7 @@ class GTDApp(App):
         await self.show(Section.IN)
 
     async def clarify_inbox(self, done: int = 0) -> bool:
-        """Walk In to empty. Returns False if Arjun stopped early."""
+        """Walk In to empty. Returns False if you stopped early."""
         while inbox := sum(in_order(self.doc.items(Section.IN)), []):  # own captures first
             self.clarify_progress = (done + 1, done + len(inbox))
             if not await self.clarify(inbox[0]):
@@ -1418,7 +1422,7 @@ class GTDApp(App):
 
     async def clarify(self, item: model.Item, source: Section | None = Section.IN,
                       start: str = "what", preset: dict | None = None) -> bool:
-        """Run the clarify card for one item and apply the answers. False if Arjun backed out.
+        """Run the clarify card for one item and apply the answers. False if you backed out.
         preset is a dict, not **kwargs: its answer names (start, due, …) would collide."""
         a = await self.push_screen_wait(self.card(item, start=start, preset=preset or {}))
         if a is None:

@@ -90,7 +90,7 @@ def card_rows(a: dict, start: str, has_projects: bool) -> list[str]:
 
 def prefill_from_item(item: model.Item, section: Section) -> dict:
     """Answers that reproduce an already-clarified item, so re-clarifying changes only
-    what Arjun changes."""
+    what you change."""
     a = {"choice": 3 if section is Section.SOMEDAY else 1, "actionable": section is not Section.SOMEDAY,
          "kind": "single", "action": item.text,
          "existing": item.project, "context": item.context, "who": item.waiting,
@@ -168,7 +168,7 @@ class TaskInput(Input):
 
 
 class ClarifyScreen(ModalScreen):
-    """Dismisses with the answers dict, or None when Arjun backs out of the first row."""
+    """Dismisses with the answers dict, or None when you back out of the first row."""
 
     BINDINGS = [Binding("escape", "back", "Back"),
                 Binding("j", "cursor(1)", show=False), Binding("k", "cursor(-1)", show=False),

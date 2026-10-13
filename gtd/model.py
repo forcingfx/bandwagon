@@ -212,7 +212,7 @@ def propose(doc: Doc, text: str, src: str, today: date) -> Item:
 
 
 def expire_proposals(doc: Doc, today: date, days: int = 7) -> list[Item]:
-    """Drop proposals left in In for `days` or more; Arjun's own captures never expire."""
+    """Drop proposals left in In for `days` or more; your own captures never expire."""
     cutoff = today - timedelta(days=days)
     gone = [i for i in doc.items(Section.IN) if i.src and i.added and i.added <= cutoff]
     doc.sections[Section.IN.value] = [i for i in doc.items(Section.IN) if i not in gone or i.raw]

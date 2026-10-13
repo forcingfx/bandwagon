@@ -269,7 +269,7 @@ def main(argv: list[str] | None = None, today: date | None = None) -> None:
     p = sub.add_parser("expire", help="drop old proposals from In")
     p.add_argument("--days", type=int, default=7)
     p.add_argument("--area")
-    p = sub.add_parser("sweep", help="file checkboxes ticked in Obsidian")
+    p = sub.add_parser("sweep", help="file checkboxes ticked in the file itself")
     p.add_argument("--area")
     helptext.finish(sub)
     args = parser.parse_args(helptext.expand(sys.argv[1:] if argv is None else argv))

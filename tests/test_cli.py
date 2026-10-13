@@ -325,3 +325,39 @@ def test_help_with_an_unknown_command_says_so(capsys, no_side_effects):
         cli.main(["help", "frobnicate"], today=TODAY)
     assert exit_.value.code == 2
     assert "frobnicate" in capsys.readouterr().err
+
+
+# Config: a stranger's first mistakes get one clear line, never a traceback
+
+def test_missing_config_points_at_init_and_the_files_screen(tmp_path):
+    with pytest.raises(SystemExit) as exit_:
+        config.load(tmp_path / "none.toml")
+    assert "gtd init" in str(exit_.value) and "README.md" in str(exit_.value)
+
+
+def test_broken_config_is_one_clear_line(tmp_path):
+    cfg = tmp_path / "config.toml"
+    cfg.write_text("[areas.work\nfile = 'x.md'\n")
+    with pytest.raises(SystemExit) as exit_:
+        config.load(cfg)
+    assert str(exit_.value).startswith(f"Can't read {cfg}")
+
+
+def test_area_without_a_file_is_named(tmp_path):
+    cfg = tmp_path / "config.toml"
+    cfg.write_text("[areas.work]\nproposal_cap = 3\n")
+    with pytest.raises(SystemExit) as exit_:
+        config.load(cfg)
+    assert "[areas.work]" in str(exit_.value) and "file" in str(exit_.value)
+
+
+def test_example_config_parses_into_two_areas(tmp_path):
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(config.EXAMPLE)
+    areas, capture = config.load(cfg)
+    assert list(areas) == ["work", "home"] and capture == "work"
+    assert areas["work"].proposal_reserve == {"process": 3} and areas["home"].completions_log
+
+
+def test_load_or_empty_gives_no_areas_without_a_config(tmp_path):
+    assert config.load_or_empty(tmp_path / "none.toml") == ({}, None)

@@ -29,11 +29,11 @@ Automation (for scripts, skills and timers)
                          Suggest a task to In, with where it came from.
   gtd list               Print every task as JSON.
   gtd expire             Remove suggestions left unsorted in In for 7 days.
-  gtd sweep              File tasks you ticked in Obsidian: done, or due again.
+  gtd sweep              File tasks you ticked in the file: done, or due again.
 
 Options
-  --area NAME            Use one area, work or home. add defaults to work,
-                         list, expire and sweep to both.
+  --area NAME            Use one area from your config. add defaults to the
+                         capture area; list, expire and sweep to all.
   --file PATH            Use this one gtd.md file instead of your areas.
   -h, --help             Show this help. gtd help COMMAND: one command's help.
   --version              Print the version and exit.
@@ -48,7 +48,7 @@ Examples
   gtd find passport
       One line per match: area, list, open or done, task.
 
-Full docs: ~/gtd/README.md, design in ~/mindpalace/system/docs/gtd-app-design.md
+Full docs: README.md at https://github.com/forcingfx/bandwagon
 """
 
 # Per command: what it does (description) and real invocations (epilog).
@@ -91,7 +91,7 @@ COMMANDS = {
                'Example:\n'
                '  gtd expire --days 7\n'
                '      Expired from work In: Reply to Ben re hiring'),
-    "sweep": ("File the tasks you ticked in Obsidian: one-off tasks move to Done,\n"
+    "sweep": ("File the tasks you ticked in the file itself: one-off tasks move to Done,\n"
               "repeating ones roll their due date forward. Run by a timer.",
               'Example:\n'
               '  gtd sweep\n'
@@ -102,8 +102,8 @@ COMMANDS = {
 ARGS = {
     "text": "the task, in quotes",
     "words": "words from the task's text",
-    "area": "work or home (default: work)",
-    "area_all": "only this area, work or home (default: both)",
+    "area": "an area from your config (default: the capture area)",
+    "area_all": "only this area (default: every area)",
     "section": "the list to use, e.g. in, next, waiting, someday",
     "src": "link to where the suggestion came from",
     "days": "age in days before a suggestion goes (default: 7)",
