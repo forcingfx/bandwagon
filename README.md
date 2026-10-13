@@ -6,7 +6,7 @@ command it is a scripting CLI that reads and writes the same file. The file stay
 `- [ ]` lines under six `##` headings, so it is readable and editable in any editor or
 notes app, and it works unchanged inside an Obsidian vault.
 
-![The app](docs/screenshot.png)
+![Next Actions in the app](docs/screenshot.svg)
 
 ## Install
 
