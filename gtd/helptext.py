@@ -3,8 +3,13 @@ reads no config, writes nothing and never opens the app. Plain ASCII, 80 columns
 from __future__ import annotations
 
 import argparse
+import sys
+
+from . import __version__
 
 WIDTH = 80
+# argparse learnt to colour help in 3.14, and that kwarg is new; older versions never colour.
+NO_COLOUR = {"color": False} if sys.version_info >= (3, 14) else {}
 
 TOP = """\
 gtd: capture, sort and tick off your tasks, work and home, from one place.
@@ -31,6 +36,7 @@ Options
                          list, expire and sweep to both.
   --file PATH            Use this one gtd.md file instead of your areas.
   -h, --help             Show this help. gtd help COMMAND: one command's help.
+  --version              Print the version and exit.
 
 Examples
   gtd add "Call Anna re Q4 budget" --context calls --due fri
@@ -121,8 +127,9 @@ class TopHelp(argparse.Action):
 
 
 def parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="gtd", add_help=False, color=False, formatter_class=Formatter)
+    p = argparse.ArgumentParser(prog="gtd", add_help=False, formatter_class=Formatter, **NO_COLOUR)
     p.add_argument("-h", "--help", action=TopHelp, help="show this help")
+    p.add_argument("--version", action="version", version=f"gtd {__version__}")
     return p
 
 

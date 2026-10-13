@@ -315,6 +315,11 @@ def test_command_help_fits_and_has_an_example(name, capsys, no_side_effects, mon
     assert run_help(["help", name], capsys) == out
 
 
+def test_version_prints_the_package_version(capsys, no_side_effects):
+    from gtd import __version__
+    assert run_help(["--version"], capsys).strip() == f"gtd {__version__}"
+
+
 def test_help_with_an_unknown_command_says_so(capsys, no_side_effects):
     with pytest.raises(SystemExit) as exit_:
         cli.main(["help", "frobnicate"], today=TODAY)
