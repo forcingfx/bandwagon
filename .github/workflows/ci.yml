@@ -1,0 +1,32 @@
+# Why: proves a stranger's clone lints and passes its tests on the Python floor (3.11) and
+# the current version, on both platforms the app branches on (open/pbcopy on macOS,
+# xdg-open and wl-copy/xclip/xsel on Linux, fcntl on both).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} · py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20   # the suite takes ~2 min; macOS runners are slower
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python }}
+      - run: uv sync --locked   # the lockfile is the contract; a drifted lock fails here, not on a user's machine
+      - run: uv run ruff check .
+      - run: uv run pytest -q
