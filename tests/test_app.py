@@ -1445,4 +1445,85 @@ def test_opener_and_clipboard_match_the_platform():
     if sys.platform == "darwin":
         assert app_module.OPENER == ["open"] and app_module.CLIPBOARD == ["pbcopy"]
     else:
-        assert app_module.OPENER == ["xdg-open"] and app_module.CLIPBOARD == ["wl-copy"]
+        assert app_module.OPENER == ["xdg-open"] and app_module.CLIPBOARD in app_module.LINUX_CLIPBOARDS
+
+
+# The Files screen: create or pick a task file, looked at before it loads
+
+def files_app(cfg, *keys):
+    from gtd import config
+
+    async def go():
+        areas, capture = config.load_or_empty(cfg)
+        app = GTDApp(areas, today=TODAY, capture=capture, config_path=cfg)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            for key in keys:
+                if isinstance(key, tuple):
+                    await pilot.press(*key[1], "enter")
+                else:
+                    await pilot.press(key)
+                await pilot.pause()
+                await pilot.pause()
+            rows = ([o.prompt.plain for o in app.screen.query_one("#files").options]
+                    if type(app.screen).__name__ == "FilesScreen" else [])
+            return app, type(app.screen).__name__, rows
+    return asyncio.run(go())
+
+
+def test_no_config_opens_the_files_screen_and_n_creates_a_file(tmp_path):
+    cfg = tmp_path / "config.toml"
+    file = tmp_path / "vault" / "gtd.md"
+    app, screen, rows = files_app(cfg, "n", "ctrl+u", T(str(file)), "ctrl+u", T("vault"))
+    assert screen == "FilesScreen" and list(app.areas) == ["vault"]
+    assert file.read_text().startswith("<!-- gtd v1 -->") and "[areas.vault]" in cfg.read_text()
+    assert rows[0].startswith("vault") and "0 tasks" in rows[0]
+
+
+def test_escape_with_no_file_set_up_quits_with_a_message(tmp_path):
+    from gtd import config
+    cfg = tmp_path / "config.toml"
+
+    async def go():
+        areas, capture = config.load_or_empty(cfg)
+        app = GTDApp(areas, today=TODAY, capture=capture, config_path=cfg)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            assert type(app.screen).__name__ == "FilesScreen"
+            await pilot.press("escape")
+        return app
+    app = asyncio.run(go())
+    assert app.return_code == 1 and not cfg.exists()
+
+
+def test_a_foreign_file_asks_before_adopting(tmp_path):
+    cfg = tmp_path / "config.toml"
+    note = tmp_path / "note.md"
+    note.write_text("# Ideas\n\nprose\n")
+    app, screen, _ = files_app(cfg, "a", T(str(note)), "ctrl+u", T("ideas"))
+    assert screen == "AskScreen" and note.read_text() == "# Ideas\n\nprose\n" and not cfg.exists()
+    app, screen, _ = files_app(cfg, "a", T(str(note)), "ctrl+u", T("ideas"), "1")
+    assert note.read_text().startswith("<!-- gtd v1 -->\n# Ideas\nprose\n") and list(app.areas) == ["ideas"]
+
+
+def test_a_newer_file_is_refused_and_nothing_is_written(tmp_path):
+    cfg = tmp_path / "config.toml"
+    newer = tmp_path / "v2.md"
+    newer.write_text("<!-- gtd v2 -->\n## In\n")
+    app, screen, _ = files_app(cfg, "a", T(str(newer)), "ctrl+u", T("new"), "1")
+    assert not cfg.exists() and app.areas == {} and screen == "FilesScreen"
+
+
+def test_F_lists_areas_with_their_state_and_removes_one(tmp_path):
+    from gtd import config
+    cfg = tmp_path / "config.toml"
+    w, h = tmp_path / "w.md", tmp_path / "h.md"
+    w.write_text("<!-- gtd v1 -->\n\n## In\n- [ ] One\n")
+    h.write_text("## Next Actions\n- [ ] Fine\nstray\n")
+    config.add_area("work", w, cfg)
+    config.add_area("home", h, cfg)
+    app, screen, rows = files_app(cfg, "F")
+    assert screen == "FilesScreen" and "1 task" in rows[0] and "1 hidden line" in rows[1] and "no header" in rows[1]
+    app, screen, _ = files_app(cfg, "F", "down", "backspace", "1")
+    assert list(app.areas) == ["work"] and "[areas.home]" not in cfg.read_text() and h.exists()
+    assert app.view_areas == ["work"] and screen == "FilesScreen"

@@ -253,7 +253,7 @@ def test_save_contexts_rewrites_only_that_line(tmp_path):
 # Help: never acts, fits 80 columns, everyday first, examples, where the docs live
 
 HELP_FORMS = [["--help"], ["-h"], ["help"]]
-SUBCOMMANDS = ["add", "propose", "done", "find", "list", "expire", "sweep"]
+SUBCOMMANDS = ["add", "propose", "done", "find", "list", "expire", "sweep", "init"]
 
 
 @pytest.fixture
@@ -361,3 +361,61 @@ def test_example_config_parses_into_two_areas(tmp_path):
 
 def test_load_or_empty_gives_no_areas_without_a_config(tmp_path):
     assert config.load_or_empty(tmp_path / "none.toml") == ({}, None)
+
+
+# Areas in and out of the config, and gtd init
+
+def test_area_edits_keep_comments_and_the_other_areas(tmp_path):
+    cfg = tmp_path / "config.toml"
+    cfg.write_text('# mine\ncapture = "work"\ncontexts = ["@calls"]\n\n[areas.work]\nfile = "w.md"   # keep\nproposal_cap = 2\n')
+    config.add_area("home", tmp_path / "h.md", cfg)
+    areas, capture = config.load(cfg)
+    assert list(areas) == ["work", "home"] and areas["home"].file == tmp_path / "h.md" and capture == "work"
+    with pytest.raises(ValueError):
+        config.add_area("home", tmp_path / "x.md", cfg)
+    config.rename_area("work", "office", cfg)
+    assert list(config.load(cfg)[0]) == ["office", "home"] and config.load(cfg)[1] == "office"
+    config.set_area_file("home", tmp_path / "h2.md", cfg)
+    assert config.load(cfg)[0]["home"].file == tmp_path / "h2.md"
+    config.remove_area("office", cfg)
+    text = cfg.read_text()
+    assert "# mine" in text and "[areas.office]" not in text and "capture" not in text and "# keep" not in text
+    assert list(config.load(cfg)[0]) == ["home"] and config.contexts(cfg) == ["@calls"]
+    assert config.area_name("Work Notes!") == "work-notes" and config.area_name("") is None
+
+
+def test_init_creates_the_file_and_the_config(tmp_path, monkeypatch, capsys):
+    cfg = tmp_path / "config.toml"
+    monkeypatch.setattr(config, "CONFIG", cfg)
+    file = tmp_path / "vault" / "gtd.md"
+    cli.main(["init", str(file)], today=TODAY)
+    assert capsys.readouterr().out.startswith("Added vault:") and file.read_text().startswith("<!-- gtd v1 -->")
+    areas, capture = config.load(cfg)
+    assert areas["vault"].file == file and capture == "vault"
+    with pytest.raises(SystemExit) as exit_:
+        cli.main(["init", str(file)], today=TODAY)
+    assert "already an area" in str(exit_.value)
+    cli.main(["init", str(tmp_path / "other.md"), "--area", "home"], today=TODAY)
+    assert list(config.load(cfg)[0]) == ["vault", "home"]
+
+
+def test_init_refuses_a_newer_file_and_adopts_a_plain_one(tmp_path, monkeypatch, capsys):
+    cfg = tmp_path / "config.toml"
+    monkeypatch.setattr(config, "CONFIG", cfg)
+    newer = tmp_path / "v3.md"
+    newer.write_text("<!-- gtd v3 -->\n## In\n")
+    with pytest.raises(SystemExit) as exit_:
+        cli.main(["init", str(newer)], today=TODAY)
+    assert "newer gtd" in str(exit_.value) and not cfg.exists() and newer.read_text() == "<!-- gtd v3 -->\n## In\n"
+    plain = tmp_path / "plain.md"
+    plain.write_text("# Ideas\n- [ ] not in a list\n")
+    cli.main(["init", str(plain), "--area", "ideas"], today=TODAY)
+    assert "Not a gtd file" in capsys.readouterr().out
+    assert plain.read_text().startswith("<!-- gtd v1 -->\n# Ideas\n- [ ] not in a list\n") and "## In" in plain.read_text()
+
+
+def test_commands_without_a_config_point_at_init(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "CONFIG", tmp_path / "none.toml")
+    with pytest.raises(SystemExit) as exit_:
+        cli.main(["list"], today=TODAY)
+    assert "gtd init" in str(exit_.value)

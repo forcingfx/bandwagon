@@ -235,6 +235,23 @@ def cmd_expire(areas, today: date, days: int, area: str | None = None) -> list[s
     return report
 
 
+def cmd_init(file: Path, area: str | None, config_path: Path) -> str:
+    """Add a task file to the config, creating it with the six lists when it does not exist.
+    A plain markdown file is adopted (the lists appended, its lines kept); a file from a
+    newer gtd, or one that can't be read, is refused. Scripts' equivalent of the F screen."""
+    file = file.expanduser().absolute()
+    report = store.inspect(file)
+    if report.refused:
+        raise SystemExit(f"{file}: {report.sentence()}")
+    name = area or config.area_name(file.parent.name) or "main"
+    try:
+        config.add_area(name, file, config_path)
+    except ValueError as e:
+        raise SystemExit(str(e)) from None
+    store.prepare(file, report)
+    return f"Added {name}: {config.portable(file)} ({report.sentence()})\nConfig: {config_path}"
+
+
 def tag_flags(p) -> None:
     p.add_argument("--context", action="append", help="e.g. @calls; repeat or comma-separate for several")
     p.add_argument("--project", help="project slug, without +")
@@ -271,16 +288,23 @@ def main(argv: list[str] | None = None, today: date | None = None) -> None:
     p.add_argument("--area")
     p = sub.add_parser("sweep", help="file checkboxes ticked in the file itself")
     p.add_argument("--area")
+    p = sub.add_parser("init", help="add a task file to the config, creating it if needed")
+    p.add_argument("path", type=Path)
+    p.add_argument("--area", help="name for the area (default: the file's folder name)")
     helptext.finish(sub)
     args = parser.parse_args(helptext.expand(sys.argv[1:] if argv is None else argv))
     today = today or date.today()
 
+    if args.command == "init":
+        return print(cmd_init(args.path, args.area, config.CONFIG))
     if args.file:
         areas, capture = config.single(args.file), "main"
+    elif args.command is None and interactive():   # the app opens on its Files screen when nothing is set up
+        areas, capture = config.load_or_empty()
     else:
         areas, capture = config.load()
     area = getattr(args, "area", None) or capture
-    if area not in areas:
+    if args.command and area not in areas:
         raise SystemExit(f"Unknown area {area!r}; configured: {', '.join(areas)}")
 
     tags = {k: getattr(args, k, None) for k in ("context", "project", "waiting", "every", "start", "due")}

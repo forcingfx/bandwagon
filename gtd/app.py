@@ -72,6 +72,7 @@ HELP = [
     ("The five steps", [("a", "capture (Tab: save and capture another)"), ("c", "clarify In"),
                         ("w", "weekly review (n next step, Esc stop)"), ("f", "show one context in Next Actions"),
                         ("L", "contexts: add, rename, delete, reorder"),
+                        ("F", "files: create or pick a task file; add, move, rename or remove an area"),
                         ("d", "show or hide deferred tasks, whose start date is still ahead")]),
     ("Everything else", [("/", "search tasks and commands"), ("?", "this screen"), ("Esc", "clear marks / stop review"),
                          ("q", "quit")]),
@@ -228,7 +229,7 @@ PALETTE_GROUPS = [  # (heading, the actions it holds, by name before any "(")
     ("Do", {"capture", "clarify", "star", "complete", "undo", "review", "review_next", "engage", "open_link"}),
     ("Edit item", {"edit", "edit_field", "delete", "toggle_mark"}),
     ("Lists & views", {"go", "cycle_view", "show_area", "toggle_later", "clear_ticked", "clear_proposals", "help"}),
-    ("Settings", {"manage_contexts", "capture_to", "prune_now", "toggle_prune", "quit"}),
+    ("Settings", {"manage_files", "manage_contexts", "capture_to", "prune_now", "toggle_prune", "quit"}),
 ]
 PALETTE_WIDTH = 76  # characters in a row: the name on the left, its key or list on the right
 
@@ -609,6 +610,155 @@ def context_name(text: str) -> str | None:
     return "@" + "-".join(words) if words else None
 
 
+class FilesScreen(ModalScreen):
+    """F: the task files, one per area, each looked at before it loads. n creates a file, a
+    adds one you have (a plain markdown file can be adopted; one from a newer gtd, or that
+    can't be read, is refused), e moves an area to another file, r renames it, ⌫ takes it
+    out of the config (the file stays), Enter shows only that area. Esc closes."""
+
+    BINDINGS = [Binding("escape", "back", "Close"),
+                Binding("j", "cursor(1)", show=False), Binding("k", "cursor(-1)", show=False),
+                Binding("n", "new_file", show=False), Binding("a", "add_file", show=False),
+                Binding("e", "move", show=False), Binding("r", "rename", show=False),
+                Binding("backspace", "remove", show=False), Binding("delete", "remove", show=False)]
+    HINT = "n new file · a add existing · e change path · r rename · ⌫ remove · Enter show only · Esc close"
+    EMPTY = "No task file yet. Press n to create one, or a to add one you already have."
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.report: store.Report | None = None   # what inspect said about the file being added
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Static("Files", classes="question", markup=False)
+            yield OptionList(id="files")
+            yield Static(self.HINT, classes="hint", markup=False)
+
+    def on_mount(self) -> None:
+        self.draw(0)
+
+    def draw(self, at: int | None = None) -> None:
+        options = self.query_one("#files", OptionList)
+        keep = options.highlighted if at is None else at
+        options.clear_options()
+        names = list(self.app.areas)
+        width = max((len(n) for n in names), default=0) + 2
+        rows = [Option(Content.assemble((f"{name:<{width}}", AREA_COLOURS.get(name, COUNT_COLOUR)),
+                                        config.portable(area.file), ("  " + store.inspect(area.file).chip, "dim")),
+                       id=name) for name, area in self.app.areas.items()]
+        options.add_options(rows or [Option(Content.styled(self.EMPTY, "dim italic"), disabled=True)])
+        if names:
+            options.highlighted = min(keep or 0, len(names) - 1)
+        options.focus()
+
+    def current(self) -> str | None:
+        n = self.query_one("#files", OptionList).highlighted
+        names = list(self.app.areas)
+        return names[n] if n is not None and n < len(names) else None
+
+    def action_cursor(self, step: int) -> None:
+        options = self.query_one("#files", OptionList)
+        options.action_cursor_down() if step > 0 else options.action_cursor_up()
+
+    def editable(self) -> bool:
+        if self.app.config_path is None:
+            self.notify("Started with --file, so the config isn't in use and areas can't change here.",
+                        severity="warning")
+            return False
+        return True
+
+    async def checked(self, file: Path) -> bool:
+        """Look at the file first. Refuse a newer or unreadable one; ask before a foreign or
+        odd one; let a gtd file or a missing one straight through."""
+        self.report = report = store.inspect(file)
+        if report.refused:
+            await self.app.ask(f"{config.portable(file)}: {report.sentence()}", ["Pick another file"])
+            return False
+        if report.needs_consent:
+            go = "Adopt it: add the six lists" if report.status == "foreign" else "Open it anyway"
+            return await self.app.ask(f"{config.portable(file)}: {report.sentence()}", [go, "Pick another file"]) == 1
+        return True
+
+    async def apply(self, write, file: Path | None = None) -> bool:
+        """Change the config (and make or adopt the file), then reload the app."""
+        try:
+            write()
+        except ValueError as e:
+            self.notify(str(e), severity="warning")
+            return False
+        if file is not None and self.report is not None:
+            store.prepare(file, self.report)
+        await self.app.reload_areas()
+        return True
+
+    @work(exclusive=True)
+    async def action_new_file(self) -> None:
+        await self.add(new=True)
+
+    @work(exclusive=True)
+    async def action_add_file(self) -> None:
+        await self.add(new=False)
+
+    async def add(self, new: bool) -> None:
+        if not self.editable():
+            return
+        default = str(Path.cwd() / "gtd.md") if new else ""
+        if not (typed := await self.app.text("Create the task file at" if new else "Add the task file at", default)):
+            return
+        file = Path(typed).expanduser().absolute()
+        suggested = config.area_name(file.parent.name) or "main"
+        typed = await self.app.text("Name of this area (shown on the tabs)", suggested)
+        if typed is None or not (name := config.area_name(typed or suggested)):
+            return
+        if name in self.app.areas:
+            return self.notify(f"{name} is already an area.", severity="warning")
+        if await self.checked(file) and await self.apply(lambda: config.add_area(name, file, self.app.config_path), file):
+            self.draw(len(self.app.areas) - 1)
+            self.notify(f"Added {name}.")
+
+    @work(exclusive=True)
+    async def action_move(self) -> None:
+        if not (name := self.current()) or not self.editable():
+            return
+        typed = await self.app.text(f"Move {name} to the file at", config.portable(self.app.areas[name].file))
+        if not typed:
+            return
+        file = Path(typed).expanduser().absolute()
+        if await self.checked(file) and await self.apply(lambda: config.set_area_file(name, file, self.app.config_path), file):
+            self.draw()
+
+    @work(exclusive=True)
+    async def action_rename(self) -> None:
+        if not (name := self.current()) or not self.editable():
+            return
+        typed = await self.app.text(f"New name for {name}", name)
+        if not typed or not (new := config.area_name(typed)) or new == name:
+            return
+        if await self.apply(lambda: config.rename_area(name, new, self.app.config_path)):
+            self.draw()
+
+    @work(exclusive=True)
+    async def action_remove(self) -> None:
+        if not (name := self.current()) or not self.editable():
+            return
+        where = config.portable(self.app.areas[name].file)
+        if await self.app.ask(f"Take {name} out of the config? The file {where} stays where it is.", ["Remove it"]) == 1:
+            if await self.apply(lambda: config.remove_area(name, self.app.config_path)):
+                self.draw()
+
+    @on(OptionList.OptionSelected)
+    async def chosen(self, event: OptionList.OptionSelected) -> None:
+        if event.option.id in self.app.areas:
+            await self.app.action_show_area(event.option.id)
+            self.dismiss(None)
+
+    def action_back(self) -> None:
+        if not self.app.areas:
+            self.app.exit(return_code=1, message="No task file was set up. Run gtd again, or gtd init PATH.")
+        else:
+            self.dismiss(None)
+
+
 class CaptureInput(Input):
     """Handles Tab inside the input's own key queue, so a fast
     typist's next keystrokes can never overtake the save."""
@@ -681,6 +831,8 @@ class GTDApp(App):
     ContextsScreen .dialog { width: 56; }
     ContextsScreen #contexts { height: auto; max-height: 20; border: none; }
     ContextsScreen #contexts-entry { height: auto; }
+    FilesScreen .dialog { width: 96; }
+    FilesScreen #files { height: auto; max-height: 20; border: none; }
     PaletteScreen { align: center top; }
     PaletteScreen .dialog { width: 84; margin-top: 3; max-height: 85%; }
     PaletteScreen #palette-results { height: auto; max-height: 30; border: none; margin-top: 1; }
@@ -718,6 +870,7 @@ class GTDApp(App):
         Binding("h", "edit_field('dates')", "Dates", show=False),
         Binding("p", "edit_field('who')", "Waiting for", show=False),
         Binding("L", "manage_contexts", "Contexts", show=False),
+        Binding("F", "manage_files", "Files", show=False),
         Binding("q", "quit", "Quit"),
     ]
     WATCH_SECONDS = 1.0  # how often to check gtd.md for edits made outside the app
@@ -737,7 +890,7 @@ class GTDApp(App):
         self.clarify_progress: tuple[int, int] | None = None
         self.areas = areas if isinstance(areas, dict) else config.single(Path(areas))
         self.view_areas: list[str] = list(self.areas)  # areas on screen; the palette narrows it
-        self.capture_area = capture if capture in self.areas else next(iter(self.areas))
+        self.capture_area = capture if capture in self.areas else next(iter(self.areas), None)
         self.today = today or date.today()
         self.load()
         self.seen: dict[str, tuple] = {}
@@ -772,10 +925,14 @@ class GTDApp(App):
         await self.render_lists()
         self.query_one("#items").focus()
         self.set_interval(self.WATCH_SECONDS, self.watch_file)
+        if not self.areas:   # nothing set up yet: start on the Files screen
+            self.action_manage_files()
 
     async def render_lists(self) -> None:
         """Redraw everything, keeping the highlight where it was."""
         self.query_one("#tabs", Static).update(self.tabs_text())
+        if not self.areas:
+            return self.draw_rows([("divider", "No task file yet · F to create or pick one")], set())
         stalled = {p.project for p in model.stalled_projects(self.doc)}
         if self.project_view:
             return await self.render_project_page(stalled)
@@ -1106,7 +1263,7 @@ class GTDApp(App):
             for section in Section:
                 merged.items(section).extend(doc.items(section))
         reviews = [d.last_review for d in shown]
-        merged.last_review = None if None in reviews else min(reviews)
+        merged.last_review = None if not reviews or None in reviews else min(reviews)
         merged.prune_manual = all(d.prune_manual for d in shown)
         self.doc = merged
 
@@ -1266,6 +1423,7 @@ class GTDApp(App):
             *self.area_entries(),
             ("Prune Done now", "", "prune_now"),
             (prune, "", "toggle_prune"),
+            ("Files: create or pick a task file", "F", "manage_files"),
             ("Quit", "q", "quit"),
         ]
 
@@ -1667,6 +1825,25 @@ class GTDApp(App):
 
     def action_manage_contexts(self) -> None:
         self.push_screen(ContextsScreen())
+
+    # Files: which task files the app works on
+
+    def action_manage_files(self) -> None:
+        if not isinstance(self.screen, FilesScreen):
+            self.push_screen(FilesScreen())
+
+    async def reload_areas(self) -> None:
+        """Re-read the config after the Files screen changed it, keeping the view where it can."""
+        if self.config_path is None:
+            return
+        self.areas, capture = config.load_or_empty(self.config_path)
+        self.view_areas = [a for a in self.view_areas if a in self.areas] or list(self.areas)
+        if self.capture_area not in self.areas:
+            self.capture_area = capture
+        self._tag_notes.clear()
+        self.load()
+        self.seen = self.stamps()
+        await self.render_lists()
 
     def area_projects(self, area: str | None) -> list[model.Item]:
         doc = self.docs.get(area) if area else None

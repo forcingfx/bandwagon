@@ -132,3 +132,47 @@ def test_star_round_trips_as_a_date_tag():
     line = "- [ ] Draft memo @computer +maps added:2026-10-01 star:2026-10-02"
     item = store.parse_item(line)
     assert str(item.star) == "2026-10-02" and item.added and item.line() == line
+
+
+# Looking at a file before loading it
+
+def test_inspect_classifies_files_without_writing(tmp_path):
+    missing = tmp_path / "new" / "gtd.md"
+    assert store.inspect(missing).status == "missing"
+    ok = tmp_path / "ok.md"
+    ok.write_text("<!-- gtd v1 -->\n\n## In\n- [ ] One\n\n## Next Actions\n")
+    report = store.inspect(ok)
+    assert (report.status, report.items, report.refused, report.needs_consent) == ("ok", 1, False, False)
+    foreign = tmp_path / "note.md"
+    foreign.write_text("# My note\n\nSome prose.\n")
+    report = store.inspect(foreign)
+    assert report.status == "foreign" and report.other_lines == 2 and report.needs_consent and "Adopting" in report.sentence()
+    partial = tmp_path / "partial.md"
+    partial.write_text("## Next Actions\n- [ ] Fine\nnot a task\n\n## Notes\n- stuff\n")
+    report = store.inspect(partial)
+    assert (report.status, report.raw_lines, report.unknown_sections, report.version) == ("partial", 1, ["Notes"], None)
+    assert "hidden" in report.sentence() and "Notes" in report.sentence() and "No gtd header" in report.sentence()
+    newer = tmp_path / "v2.md"
+    newer.write_text("<!-- gtd v2 -->\n\n## In\n")
+    report = store.inspect(newer)
+    assert report.status == "newer" and report.refused and "newer gtd (v2)" in report.sentence()
+    binary = tmp_path / "bin.md"
+    binary.write_bytes(b"\xff\xfe\x00bad")
+    assert store.inspect(binary).status == "unreadable"
+    assert store.inspect(tmp_path).status == "unreadable"
+    assert foreign.read_text() == "# My note\n\nSome prose.\n" and not missing.exists()
+
+
+def test_prepare_creates_a_missing_file_and_adopts_a_foreign_one(tmp_path):
+    missing = tmp_path / "deep" / "er" / "gtd.md"
+    store.prepare(missing, store.inspect(missing))
+    assert missing.read_text().startswith("<!-- gtd v1 -->") and "## Someday/Maybe" in missing.read_text()
+    foreign = tmp_path / "note.md"
+    foreign.write_text("# My note\n\nSome prose.\n")
+    store.prepare(foreign, store.inspect(foreign))
+    assert foreign.read_text().startswith("<!-- gtd v1 -->\n# My note\nSome prose.\n\n## In\n")
+    assert store.inspect(foreign).status == "ok"
+    partial = tmp_path / "partial.md"
+    partial.write_text("## Next Actions\n- [ ] Fine\nstray\n")
+    store.prepare(partial, store.inspect(partial))
+    assert partial.read_text() == "## Next Actions\n- [ ] Fine\nstray\n"   # left alone until the first change

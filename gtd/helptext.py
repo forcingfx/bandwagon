@@ -23,6 +23,7 @@ Everyday
                          opens if several match.
   gtd find "words"       Find tasks by words or tags; in a terminal, a picker
                          to tick (Space) or star (s) them.
+  gtd init PATH          Add a task file to your config, made if missing.
 
 Automation (for scripts, skills and timers)
   gtd propose "text" --src LINK
@@ -91,6 +92,13 @@ COMMANDS = {
                'Example:\n'
                '  gtd expire --days 7\n'
                '      Expired from work In: Reply to Ben re hiring'),
+    "init": ("Add a task file to your config, creating it with the six lists when it\n"
+             "does not exist. A plain markdown file is adopted: the lists are appended\n"
+             "and its own lines stay. A file from a newer gtd, or one that can't be\n"
+             "read, is refused. In the app, F does the same with a picker.",
+             'Example:\n'
+             '  gtd init ~/notes/gtd.md --area notes\n'
+             '      Added notes: ~/notes/gtd.md (Not there yet: it will be created ...)'),
     "sweep": ("File the tasks you ticked in the file itself: one-off tasks move to Done,\n"
               "repeating ones roll their due date forward. Run by a timer.",
               'Example:\n'
@@ -107,6 +115,7 @@ ARGS = {
     "section": "the list to use, e.g. in, next, waiting, someday",
     "src": "link to where the suggestion came from",
     "days": "age in days before a suggestion goes (default: 7)",
+    "path": "the task file, e.g. ~/notes/gtd.md",
 }
 
 
