@@ -1,12 +1,12 @@
 # bandwagon
 
-**A terminal app for David Allen's *Getting Things Done*, over one plain markdown file per area of your life.** The command is `gtd`. With no arguments it opens the app; with a command it is a scripting CLI that reads and writes the same file. The file is `- [ ]` lines under six `##` headings and nothing else, so it reads in any editor or notes app, diffs cleanly in git, and works unchanged inside an Obsidian vault.
+**bandwagon keeps your tasks in one plain markdown file per area of your life and runs David Allen's *Getting Things Done* over it from the terminal.** The command is `gtd`. With no arguments it opens the app. With a command it is a scripting CLI, and both read and write the same file. The file holds `- [ ]` lines under six `##` headings and nothing else. Any editor can read it, and an Obsidian vault takes it unchanged.
 
 ![Next Actions in the app](docs/screenshot.svg)
 
 ## Install
 
-**One command, on macOS or Linux, with [uv](https://docs.astral.sh/uv/).** uv fetches Python 3.11 or newer if there is none.
+**One command installs it on macOS or Linux.** It needs [uv](https://docs.astral.sh/uv/), which fetches Python 3.11 or newer when the machine has none.
 
 ```sh
 curl -LsSf https://astral.sh/uv/install.sh | sh        # only if you don't have uv
@@ -18,13 +18,13 @@ gtd --version
 
 ## The first run
 
-**Run `gtd` and it opens on the Files screen, because nothing is configured yet.** `n` creates a task file; the default is `gtd.md` in the current folder, so running it inside your notes folder keeps the file there. `a` adds a file you already have. `F` brings the screen back at any time, to add, move, rename or remove an area.
+**`gtd` opens on the Files screen the first time, because nothing is configured yet.** `n` creates a task file. The default path is `gtd.md` in the current folder: run it inside your notes folder and the file stays there. `a` adds a file you already have. `F` brings the screen back at any time to add, move, rename or remove an area.
 
-- **Every file is looked at before it loads, and nothing is written until you say so.** A gtd file, or a path that does not exist yet, goes straight in. A plain markdown file is offered for adoption: the six lists are appended and its own lines stay where they are. A file with stray lines inside the lists, or lists the app does not know, says so and keeps them. A file written by a newer gtd, or one that cannot be read, is refused.
+- **The app looks at every file before it loads it, and writes nothing until you say so.** A gtd file, or a path that does not exist yet, goes straight in. A plain markdown file is offered for adoption: the six lists are appended and its own lines stay where they are. A file with stray lines inside the lists, or with lists the app does not know, says so and keeps them. A file written by a newer gtd, or one that cannot be read, is refused.
 - **`gtd init PATH [--area NAME]` does the same from a script,** with no prompts.
 - **`gtd --file PATH` works on one file with no config at all.**
 
-**Each area is one file, and the app shows them side by side.** The config is `~/.config/gtd/config.toml`, or whatever `$GTD_CONFIG` names. The Files screen writes it; this is the whole format:
+**Each area is one file, and the app shows the areas side by side.** The config is `~/.config/gtd/config.toml`, or the path in `$GTD_CONFIG`. The Files screen writes it. This is the whole format:
 
 ```toml
 # gtd config. One [areas.NAME] per task file; the app shows them side by side.
@@ -44,7 +44,7 @@ completions_log = "~/notes/home/completions.md"   # a table of recurring and one
 
 ## The file
 
-**Each GTD list is one `##` section, because the book insists on hard edges between the categories, and a heading keeps that edge visible in any editor.** The sections are In, Next Actions, Projects, Waiting For, Someday/Maybe and Done. The header comment carries the format version, the last weekly review and the prune setting.
+**Each GTD list is one `##` section, because the book insists on hard edges between the categories, and a heading keeps that edge visible in any editor.** The sections are In, Next Actions, Projects, Waiting For, Someday/Maybe and Done. The header comment carries the format version, the date of the last weekly review and the prune setting.
 
 ```markdown
 <!-- gtd v1 · last-review: 2026-10-13 -->
@@ -58,27 +58,27 @@ completions_log = "~/notes/home/completions.md"   # a table of recurring and one
 ## Done
 ```
 
-- **Each item is one `- [ ]` line, with tags only at the end.** `@context` (several allowed), `+project`, `waiting:who`, `every:weekly`, `start:`, `due:`, `added:`, `done:`, `star:`, and `src:` for where an automated proposal came from. Tags are read only from the end of a line, so an `@` in the middle of a sentence stays text.
+- **Each item is one `- [ ]` line with its tags at the end.** The tags are `@context`, `+project`, `waiting:who`, `every:weekly`, `start:`, `due:`, `added:`, `done:`, `star:` and `src:`, which records where an automated proposal came from. An item can carry several contexts side by side. The parser reads tags only from the end of a line, which means an `@` in the middle of a sentence stays text.
 - **A line the app cannot read is kept exactly as written,** and so is any `##` section it does not know. A hand edit is never destroyed.
-- **Links go in the task text in markdown's own forms,** `[label](url)` for anything and `[[note|label]]` for a note beside the file (an Obsidian wikilink). `o` opens a link from the app: `open` on macOS, `xdg-open` on Linux, and if that fails the link goes to the clipboard (`pbcopy`, or `wl-copy`, `xclip` or `xsel`). Under Sway, an Obsidian note is also pulled to the current workspace.
+- **Links go in the task text in markdown's own forms.** `[label](url)` links anything, and `[[note|label]]` links a note beside the file, which is Obsidian's wikilink. `o` opens a link from the app, with `open` on macOS and `xdg-open` on Linux. When opening fails the link goes to the clipboard instead, through `pbcopy` on macOS and `wl-copy`, `xclip` or `xsel` on Linux. Under Sway, an Obsidian note is also pulled to the current workspace.
 - **Done items older than 14 days are dropped on write,** unless the header says `prune: manual`.
-- **Every change re-reads the file first and writes through an atomic rename,** under a lock that the app, the CLI and any timer share. An edit that arrives from an editor or a sync client while the app is open is merged, not overwritten, and appears on its own within a second.
+- **Every change re-reads the file first and writes through an atomic rename,** under a lock that the app, the CLI and any timer share. An edit from an editor or a sync client that arrives while the app is open is merged into the next write, and it appears in the app on its own within a second.
 
 ## The app
 
-**Press `?` for every key and `/` to search tasks and commands in one box.** Every pop-up answers to a number, and `Esc` goes back one step with nothing written.
+**`?` shows every key, and `/` searches tasks and commands in one box.** Every pop-up answers to a number, and `Esc` goes back one step with nothing written.
 
-- **Capture, `a`.** `Enter` saves and closes; `Tab` saves and clears the box for the next one.
-- **Clarify, `c`, walks In to empty through Allen's questions on one card:** what is it, what is the next action, which project, defer, delegate or do it now, then context and dates. `c` on any item re-opens the card prefilled, which is how an item moves between lists. Single fields have their own keys: `m` project, `l` context, `h` dates, `p` waiting for.
-- **Organize happens in the lists.** `Space` ticks, `e` edits the text, `⌫` deletes, `x` marks rows for a bulk delete, and `z` undoes any of it one step at a time. `Enter` on a project opens its page.
-- **Reflect, `w`, is a guided tour of the lists in the book's order,** with the step and what to do in it on the status line. `n` moves on; the last `n` records the review date.
-- **Engage, `f`, filters Next Actions by context.** Next Actions groups one-offs by project, tasks without a project first, then recurring tasks in their own block.
-- **`s` stars an item for Focus,** a tab after In that lists every star across every area until the item is done or unstarred. `d` shows or hides deferred tasks, whose start date is still ahead.
-- **`v` cycles the areas, `L` edits the contexts, `F` the files.** The Project and Context rows are search boxes: type to narrow, `Enter` takes, and the last row creates a new one from the words typed.
+- **`a` captures.** `Enter` saves and closes. `Tab` saves and clears the box for the next item.
+- **`c` clarifies, walking In to empty through Allen's questions on one card:** what is it, what is the next action, which project, and whether to defer, delegate or do it now, then a context and dates. `c` on any item re-opens the card prefilled, which is how an item moves between lists. `m`, `l`, `h` and `p` open the card on one row: project, context, dates, waiting for.
+- **The lists are where you organize.** `Space` ticks, `e` edits the text, `⌫` deletes, `x` marks rows for one bulk delete, and `z` undoes any of these one step per press. `Enter` on a project opens its page.
+- **`w` runs the weekly review as a guided tour of the lists in the book's order.** The status line shows the step and what to do in it. `n` moves on, and the last `n` records the review date.
+- **`f` filters Next Actions by context.** Next Actions groups one-off tasks by project with unassigned tasks first, and recurring tasks sit in their own block.
+- **`s` stars an item for Focus.** Focus is a tab after In that lists every starred item across every area until it is done or unstarred. `d` shows or hides deferred tasks, whose start date is still ahead.
+- **`v` cycles the areas, `L` edits the contexts and `F` edits the files.** The Project and Context rows are search boxes: type to narrow, `Enter` takes, and the last row creates a new entry from the words typed.
 
 ## The command line
 
-**`gtd --help` lists every command with examples, and `gtd help COMMAND` shows one.** In a terminal, `done` and `find` open a picker over the matches; from a script they print or refuse and never prompt.
+**`gtd --help` lists every command with examples, and `gtd help COMMAND` shows one.** In a terminal, `done` and `find` open a picker over the matches. From a script they print or refuse and never prompt.
 
 ```sh
 gtd add "Call Anna re Q4 budget" --context calls --due fri
@@ -87,9 +87,9 @@ gtd find passport
 gtd list --area home --section next     # JSON
 ```
 
-**Scripts never edit the file by hand; every write goes through these commands,** so one parser, one lock and one atomic rename cover everything.
+**Scripts never edit the file by hand.** Every write goes through these commands, which means one parser and one lock handle every change the same way.
 
-- **`gtd propose "text" --src LINK` suggests a task to In with where it came from.** The area's `proposal_cap` limits proposals per day, and extras are parked in `task-overflow.md` under its `state_dir`. `proposal_reserve` keeps slots of the cap for a named caller, who says who it is with `--caller NAME` or `$GTD_CALLER`.
+- **`gtd propose "text" --src LINK` suggests a task to In and records where it came from.** The area's `proposal_cap` limits proposals per day, and extras are parked in `task-overflow.md` under its `state_dir`. `proposal_reserve` keeps slots of the cap for a named caller, and a caller names itself with `--caller NAME` or `$GTD_CALLER`.
 - **`gtd expire` drops proposals left unsorted in In for seven days, and `gtd sweep` files checkboxes ticked in the file itself.** Both are meant for a timer.
 
 ## Development
