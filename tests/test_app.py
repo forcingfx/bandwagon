@@ -156,7 +156,7 @@ def test_c_after_capture_clarifies_the_new_item_first(tmp_path):
 def test_c_continues_through_rest_of_in_from_the_top(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text("<!-- gtd v1 -->\n\n## In\n- [ ] First\n- [ ] Second\n- [ ] Third\n")
-    app = run(path, "down", "down", "down", "c",
+    run(path, "down", "down", "down", "c",
               "4",   # Third (highlighted): trash
               "4")   # then First from the top: trash
     assert [i.text for i in store.load(path).items(Section.IN)] == ["Second"]
@@ -511,7 +511,6 @@ def test_question_mark_shows_every_key(tmp_path):
             shown = type(app.screen).__name__
             await pilot.press("escape"); await pilot.pause()
             return shown, type(app.screen).__name__
-    from gtd.app import HelpScreen
     assert asyncio.run(go()) == ("HelpScreen", "Screen")
 
 

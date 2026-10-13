@@ -1,3 +1,0 @@
-textual
-pytest
-pytest-asyncio
