@@ -138,6 +138,55 @@ def test_done_hands_several_to_the_picker_and_refuses_none(areas):
         cli.cmd_done(areas, "nothing like this", TODAY, lambda words: ["never"])
 
 
+def test_edit_sets_and_clears_tags_on_the_one_match(areas):
+    out = cli.cmd_edit(areas, "plumber", TODAY, due="2026-10-20", start="none")
+    assert out == "Edited in home Next Actions: - [ ] Call plumber @calls due:2026-10-20"
+    out = cli.cmd_edit(areas, "plumber", TODAY, start="2026-10-15", context=["none"], due="none")
+    assert out == "Edited in home Next Actions: - [ ] Call plumber start:2026-10-15"
+
+
+def test_edit_reads_start_against_the_items_own_due_date(areas):
+    cli.cmd_edit(areas, "rent", TODAY, start="3d")
+    rent = store.load(areas["home"].file).items(Section.NEXT)[0]
+    assert (rent.start, rent.due, rent.every) == (date(2026, 10, 2), date(2026, 10, 1), "monthly")
+
+
+def test_edit_rewrites_text_reading_its_tags_and_moves_lists(areas):
+    out = cli.cmd_edit(areas, "plumber", TODAY, text="Call the plumber back +boiler", section="someday")
+    assert out == "Edited in home Someday/Maybe: - [ ] Call the plumber back @calls +boiler"
+    assert texts(areas["home"], Section.SOMEDAY) == ["Call the plumber back"]
+    assert texts(areas["home"], Section.NEXT) == ["Pay rent"]
+
+
+def test_edit_refuses_ambiguous_missing_or_empty(areas):
+    cli.cmd_add(areas, "work", "Call plumber again", TODAY)
+    with pytest.raises(SystemExit, match="2 open items match"):
+        cli.cmd_edit(areas, "plumber", TODAY, due="fri")
+    with pytest.raises(SystemExit, match="0 open items match"):
+        cli.cmd_edit(areas, "nothing like this", TODAY, due="fri")
+    with pytest.raises(SystemExit, match="Nothing to change"):
+        cli.cmd_edit(areas, "rent", TODAY)
+    with pytest.raises(SystemExit, match="Can't read --due"):
+        cli.cmd_edit(areas, "rent", TODAY, due="someday soon")
+
+
+def test_updates_says_how_to_upgrade_only_when_newer(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli, "__version__", "0.1.0")
+    assert cli.cmd_updates(lambda: "0.1.0") == "gtd 0.1.0 is the latest release."
+    assert cli.cmd_updates(lambda: "0.0.9") == "gtd 0.1.0 is the latest release."
+    out = cli.cmd_updates(lambda: "0.10.0", checkout=tmp_path)
+    assert out.splitlines()[:2] == ["gtd 0.10.0 is out; this is 0.1.0.", "Upgrade: uv tool upgrade bandwagon"]
+    (tmp_path / ".git").mkdir()
+    assert f"Upgrade: git -C {tmp_path} pull" in cli.cmd_updates(lambda: "0.2.0", checkout=tmp_path)
+
+
+def test_updates_offline_is_one_clear_line():
+    def offline():
+        raise OSError("Network is unreachable")
+    with pytest.raises(SystemExit, match="Couldn't check GitHub for a newer release: Network is unreachable"):
+        cli.cmd_updates(offline)
+
+
 def test_find_matches_projects_contexts_and_people(areas):
     cli.cmd_add(areas, "work", "Send the note +payments-strategy waiting:nils", TODAY)
     cli.cmd_add(areas, "work", "Agenda item @agenda-mike", TODAY)
@@ -253,7 +302,7 @@ def test_save_contexts_rewrites_only_that_line(tmp_path):
 # Help: never acts, fits 80 columns, everyday first, examples, where the docs live
 
 HELP_FORMS = [["--help"], ["-h"], ["help"]]
-SUBCOMMANDS = ["add", "propose", "done", "find", "list", "expire", "sweep", "init"]
+SUBCOMMANDS = ["add", "propose", "done", "edit", "find", "list", "expire", "sweep", "init", "updates"]
 
 
 @pytest.fixture

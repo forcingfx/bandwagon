@@ -21,9 +21,11 @@ Everyday
   gtd add "text"         Capture a task to In, the inbox you sort later.
   gtd done "words"       Tick off the open task matching your words; a picker
                          opens if several match.
+  gtd edit "words"       Change that task's text, list or tags (--due none).
   gtd find "words"       Find tasks by words or tags; in a terminal, a picker
                          to tick (Space) or star (s) them.
   gtd init PATH          Add a task file to your config, made if missing.
+  gtd updates            Say whether a newer release is out.
 
 Automation (for scripts, skills and timers)
   gtd propose "text" --src LINK
@@ -46,8 +48,8 @@ Examples
       Captured to home In: Renew passport
   gtd done "Q4 budget"
       Ticked in work: Call Anna re Q4 budget
-  gtd find passport
-      One line per match: area, list, open or done, task.
+  gtd edit "Q4 budget" --start mon --due none
+      Edited in work Next Actions: - [ ] Call Anna re Q4 budget start:...
 
 Full docs: README.md at https://github.com/forcingfx/bandwagon
 """
@@ -75,6 +77,22 @@ COMMANDS = {
              'Example:\n'
              '  gtd done "pay rent"\n'
              '      Ticked in home: Pay rent (next due 2026-11-01)'),
+    "edit": ("Change the open task matching your words (every word, any order, text\n"
+             "or tags): --text rewrites it, --section moves it to another list, and the\n"
+             "tag flags set a tag. A tag flag given none clears it, e.g. --due none.\n"
+             "Unless exactly one task matches, nothing changes and the matches are\n"
+             "listed.",
+             'Example:\n'
+             '  gtd edit "tax certificate" --start 2027-01-15\n'
+             '      Edited in home Next Actions: - [ ] Download the tax certificate\n'
+             '      start:2027-01-15 due:2027-02-15'),
+    "updates": ("Ask GitHub for the latest release and say whether it is newer than this\n"
+                "copy, with the command that upgrades it. Only this command goes online;\n"
+                "the app never checks on its own.",
+                'Example:\n'
+                '  gtd updates\n'
+                '      gtd 0.2.0 is out; this is 0.1.0.\n'
+                '      Upgrade: uv tool upgrade bandwagon'),
     "find": ("Find tasks in every area by your words, in any order, in the text or the\n"
              "tags (+project, @context, a person, waiting:name). In a terminal it opens\n"
              "a picker over the open matches: Space ticks, s stars, / or Tab edits the\n"
@@ -115,8 +133,7 @@ ARGS = {
     "section": "the list to use, e.g. in, next, waiting, someday",
     "src": "link to where the suggestion came from",
     "days": "age in days before a suggestion goes (default: 7)",
-    "path": "the task file, e.g. ~/notes/gtd.md",
-}
+    "path": "the task file, e.g. ~/notes/gtd.md",}
 
 
 class Formatter(argparse.RawDescriptionHelpFormatter):

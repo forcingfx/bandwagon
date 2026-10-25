@@ -9,6 +9,10 @@ commands, never by hand, so every write goes through the parser and the atomic w
                                           proposal_reserve keeps slots of the cap for a caller
     gtd done "title words"                tick the one open item matching (recurring: roll);
                                           in a terminal, several matches open a picker
+    gtd edit "words" [--due fri] [--start none] [--text "..."] [--section next]
+                                          change the one open item matching: its text, its
+                                          list or its tags; a tag flag set to none clears it
+    gtd updates                           say whether a newer release is out, and how to get it
     gtd find "words"                      show matching items, open and done, in every area
                                           (every word, any order, in the text or the tags:
                                           +project, @context, a person); in a terminal, a
@@ -22,16 +26,21 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
+import urllib.request
 from datetime import date, timedelta
 from pathlib import Path
 
-from . import config, dates, helptext, model, store
+from . import __version__, config, dates, helptext, model, store
 from .model import Section
 
 SECTIONS = {s.name.lower(): s for s in Section} | {s.value.lower(): s for s in Section}
 OVERFLOW_KEEP_DAYS = 7
 EXPIRED_KEEP_DAYS = 28
+TAGS = ("context", "project", "waiting", "every", "start", "due")
+CLEAR = "none"  # gtd edit --due none: take the tag off
+RELEASES = "https://api.github.com/repos/forcingfx/bandwagon/releases/latest"
 
 
 def item_json(area: str, section: Section, item: model.Item) -> dict:
@@ -173,6 +182,71 @@ def tick_item(areas, area: str, section: Section, item: model.Item, today: date)
     return f"Ticked in {area}: {item.text}"
 
 
+def clears(value) -> bool:
+    return value == CLEAR or value == [CLEAR]
+
+
+def cmd_edit(areas, words: str, today: date, text: str | None = None, section: str | None = None, **tags) -> str:
+    """Change the one open item matching: new text (tags written at its end are read too),
+    another list, or tags set or cleared. Refuses with the listing unless exactly one matches."""
+    found = matches(areas, words, open_only=True)
+    if len(found) != 1:
+        listing = "\n".join(f"  {a} · {s.value} · {i.text}" for a, s, i in found)
+        raise SystemExit(f"{len(found)} open items match {words!r}; need exactly one.\n{listing}".rstrip())
+    area, where, item = found[0]
+    if text is None and section is None and all(v is None for v in tags.values()):
+        raise SystemExit("Nothing to change: give --text, --section or a tag flag such as --due fri or --start none")
+    # Dates parse against the item's own due date, so --start 3d before an unchanged due still reads right.
+    due = tags.get("due") or (item.due and str(item.due))
+    new = build_item(text or item.text, today, **{k: v for k, v in tags.items() if v and not clears(v)} | {
+        "due": None if clears(tags.get("due")) else due})
+    line, target = item.line(), place(section) if section else where
+
+    def edit(d):
+        it = model.find(d, where, line)
+        if text is not None:
+            it.text = new.text
+            for key in TAGS:   # tags written at the end of the new text
+                if getattr(new, key):
+                    setattr(it, key, getattr(new, key))
+        for key, value in tags.items():
+            if value is not None:
+                setattr(it, key, None if clears(value) else getattr(new, key))
+        if target is not where:
+            model.move(d, it, target)
+        edited.append(it.line())
+    edited: list[str] = []
+    store.mutate(areas[area].file, edit, today)
+    return f"Edited in {area} {target.value}: {edited[0]}"
+
+
+def latest_release(url: str = RELEASES, timeout: float = 5) -> str:
+    request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json",
+                                                   "User-Agent": f"gtd/{__version__}"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.load(response)["tag_name"].lstrip("v")
+
+
+def version_key(version: str) -> tuple[int, ...]:
+    return tuple(int(n) for n in re.findall(r"\d+", version)[:3])
+
+
+def cmd_updates(fetch=latest_release, checkout: Path | None = None) -> str:
+    """Compare this copy with the latest GitHub release and say how to upgrade. Asks the
+    network only when run; the app never checks on its own."""
+    try:
+        latest = fetch()
+    except (OSError, ValueError, KeyError) as e:
+        raise SystemExit(f"Couldn't check GitHub for a newer release: {e}") from None
+    if version_key(latest) <= version_key(__version__):
+        return f"gtd {__version__} is the latest release."
+    checkout = checkout or Path(__file__).resolve().parent.parent
+    how = f"git -C {checkout} pull" if (checkout / ".git").exists() else "uv tool upgrade bandwagon"
+    return (f"gtd {latest} is out; this is {__version__}.\n"
+            f"Upgrade: {how}\n"
+            f"Notes:   https://github.com/forcingfx/bandwagon/releases/tag/v{latest}")
+
+
 def star_item(areas, area: str, section: Section, item: model.Item, today: date) -> str:
     """Star for Focus, or unstar a starred item, as s does in the app."""
     star, line = None if item.star else today, item.line()
@@ -257,7 +331,7 @@ def tag_flags(p) -> None:
     p.add_argument("--project", help="project slug, without +")
     p.add_argument("--waiting", help="who it is waiting on")
     p.add_argument("--every", help="repeat: daily, weekly, monthly, yearly, 2-weeks")
-    p.add_argument("--due", help="due date: 2026-10-05, fri, 3d, dec 5")
+    p.add_argument("--due", help="due date: 2026-10-05, fri, 3d, dec 5 (edit: none clears)")
     p.add_argument("--start", help="hide in the app until this date (same forms)")
 
 
@@ -278,6 +352,12 @@ def main(argv: list[str] | None = None, today: date | None = None) -> None:
     tag_flags(p)
     p = sub.add_parser("done", help="tick the one open item matching; a picker in a terminal when several")
     p.add_argument("words", nargs="+")
+    p = sub.add_parser("edit", help="change the one open item matching: text, list or tags")
+    p.add_argument("words", nargs="+")
+    p.add_argument("--text", help="new text for the task")
+    p.add_argument("--section", choices=sorted(SECTIONS))
+    tag_flags(p)
+    sub.add_parser("updates", help="say whether a newer release is out")
     p = sub.add_parser("find", help="show matching items; in a terminal, a picker to work through them")
     p.add_argument("words", nargs="*")
     p = sub.add_parser("list", help="every item as JSON")
@@ -297,6 +377,8 @@ def main(argv: list[str] | None = None, today: date | None = None) -> None:
 
     if args.command == "init":
         return print(cmd_init(args.path, args.area, config.CONFIG))
+    if args.command == "updates":   # needs no config: it only asks GitHub
+        return print(cmd_updates())
     if args.file:
         areas, capture = config.single(args.file), "main"
     elif args.command is None and interactive():   # the app opens on its Files screen when nothing is set up
@@ -307,7 +389,7 @@ def main(argv: list[str] | None = None, today: date | None = None) -> None:
     if args.command and area not in areas:
         raise SystemExit(f"Unknown area {area!r}; configured: {', '.join(areas)}")
 
-    tags = {k: getattr(args, k, None) for k in ("context", "project", "waiting", "every", "start", "due")}
+    tags = {k: getattr(args, k, None) for k in TAGS}
     if args.command == "add":
         print(cmd_add(areas, area, " ".join(args.text), today, section=args.section, **tags))
     elif args.command == "propose":
@@ -319,6 +401,8 @@ def main(argv: list[str] | None = None, today: date | None = None) -> None:
             from .pick import pick
             picker = lambda words: pick(areas, words, today)  # noqa: E731
         print(cmd_done(areas, " ".join(args.words), today, picker))
+    elif args.command == "edit":
+        print(cmd_edit(areas, " ".join(args.words), today, text=args.text, section=args.section, **tags))
     elif args.command == "find" and interactive():
         from .pick import pick
         print("\n".join(pick(areas, " ".join(args.words), today)) or "Nothing changed.")
