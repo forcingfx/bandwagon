@@ -202,6 +202,9 @@ class ItemList(OptionList, inherit_bindings=False):
             elif event.style.meta.get("gtd_tick"):  # a click on the checkbox ticks (or unticks)
                 await self.app.action_complete()
 
+    def on_resize(self) -> None:
+        self.app.call_later(self.app.render_lists)  # rows are fitted to the width
+
     def action_cursor_down(self) -> None:
         self.app.anchor = None  # a plain move ends a shift-selection
         super().action_cursor_down()
@@ -231,6 +234,8 @@ PALETTE_GROUPS = [  # (heading, the actions it holds, by name before any "(")
     ("Lists & views", {"go", "cycle_view", "show_area", "toggle_later", "clear_ticked", "clear_proposals", "help"}),
     ("Settings", {"manage_files", "manage_contexts", "capture_to", "prune_now", "toggle_prune", "quit"}),
 ]
+ROW_MARGIN = 2   # the item list's scrollbar
+ACTION_MIN = 20  # fewer cells than this for the action, and a long row is cut at its end instead
 PALETTE_WIDTH = 76  # characters in a row: the name on the left, its key or list on the right
 
 
@@ -1164,12 +1169,14 @@ class GTDApp(App):
         # syntax is shown as its label, underlined, and o opens it.
         base = "strike dim" if item.done else "dim" if item.src else ""
         action, _ = model.split_trailing_links(item.text)
+        start = len(parts)
         same = next(((label, url) for label, url in chips if label.casefold() == action.strip().casefold()), None)
         if same:  # a project row titled like its note: the title is the link, with no repeat chip
             chips.remove(same)
             parts.append(self.link_part(action, same[1], base) if same[1] else (action, base))
         for text, target in [] if same else model.link_segments(action):  # a link inside the sentence stays in it
             parts.append(self.link_part(text, self.resolve(item, target), base) if target else (text, base))
+        end = len(parts)
         # Every other link comes after the action, as named chips in one fixed order:
         # the note it is about, its project, its people, its source.
         for n, (label, url) in enumerate(chips):
@@ -1196,7 +1203,21 @@ class GTDApp(App):
             parts.append(("  " + " ".join(dates), "dim"))
         if item.contexts:  # contexts close the row
             parts.append(("  " + " ".join(item.contexts), "dim"))
-        return Content.assemble(*parts)
+        return self.fit(parts, start, end)
+
+    def fit(self, parts: list, start: int, end: int) -> Content:
+        """A row wider than the screen loses the end of its action, not its tail: the due
+        date, chips and contexts stay on screen and the action ends in an ellipsis."""
+        row = Content.assemble(*parts)
+        width = self.size.width - ROW_MARGIN
+        if row.cell_length <= width:
+            return row
+        head, action, tail = (Content.assemble(*parts[:start]), Content.assemble(*parts[start:end]),
+                              Content.assemble(*parts[end:]))
+        room = width - head.cell_length - tail.cell_length
+        if room < ACTION_MIN:  # too narrow to keep the tail whole: cut the row's end as before
+            return row
+        return Content.assemble(head, action.truncate(room - 1), Content("…"), tail)
 
     def update_status(self) -> None:
         """Line 1: Allen's status, or the review step. Line 2: the keys that matter right now."""

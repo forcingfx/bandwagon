@@ -519,6 +519,29 @@ def test_long_rows_do_not_wrap():
     assert "text-wrap: nowrap" in A.CSS and "text-overflow: ellipsis" in A.CSS
 
 
+def test_a_long_action_is_shortened_so_its_due_date_and_context_stay(tmp_path):
+    path = tmp_path / "gtd.md"
+    long = "Download the tax certificate, file it under pension, and enclose it in the return " * 3
+    path.write_text(f"<!-- gtd v1 -->\n\n## Next Actions\n- [ ] {long.strip()} @computer due:2026-10-02\n")
+
+    async def go(width):
+        app = GTDApp(path, today=TODAY)
+        async with app.run_test(size=(width, 24)) as pilot:
+            await pilot.pause()
+            await pilot.press("tab")   # In is empty: on to Next Actions
+            await pilot.pause()
+            items = app.query_one("#items")
+            rows = [str(items.get_option_at_index(n).prompt) for n in range(items.option_count)]
+            await pilot.resize_terminal(width + 40, 24)
+            await pilot.pause()
+            wider = [str(items.get_option_at_index(n).prompt) for n in range(items.option_count)]
+            return rows, wider
+    rows, wider = asyncio.run(go(100))
+    row = next(r for r in rows if "tax certificate" in r)
+    assert len(row) <= 98 and row.endswith("due Oct 2  @computer") and "…" in row
+    assert len(next(r for r in wider if "tax certificate" in r)) > len(row)  # a resize redraws to the new width
+
+
 from gtd import config
 
 
