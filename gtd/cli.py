@@ -220,6 +220,19 @@ def cmd_edit(areas, words: str, today: date, text: str | None = None, section: s
     return f"Edited in {area} {target.value}: {edited[0]}"
 
 
+def cmd_drop(areas, words: str, today: date) -> str:
+    """Delete the one open item matching, as ⌫ does in the app. Refuses with the listing
+    unless exactly one matches. The dropped line is printed so it can be added back."""
+    found = matches(areas, words, open_only=True)
+    if len(found) != 1:
+        listing = "\n".join(f"  {a} · {s.value} · {i.text}" for a, s, i in found)
+        raise SystemExit(f"{len(found)} open items match {words!r}; need exactly one.\n{listing}".rstrip())
+    area, where, item = found[0]
+    line = item.line()
+    store.mutate(areas[area].file, lambda d: model.trash(d, model.find(d, where, line)), today)
+    return f"Dropped from {area} {where.value}: {line}"
+
+
 def latest_release(url: str = RELEASES, timeout: float = 5) -> str:
     request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json",
                                                    "User-Agent": f"gtd/{__version__}"})
@@ -357,6 +370,8 @@ def main(argv: list[str] | None = None, today: date | None = None) -> None:
     p.add_argument("--text", help="new text for the task")
     p.add_argument("--section", choices=sorted(SECTIONS))
     tag_flags(p)
+    p = sub.add_parser("drop", help="delete the one open item matching")
+    p.add_argument("words", nargs="+")
     sub.add_parser("updates", help="say whether a newer release is out")
     p = sub.add_parser("find", help="show matching items; in a terminal, a picker to work through them")
     p.add_argument("words", nargs="*")
@@ -403,6 +418,8 @@ def main(argv: list[str] | None = None, today: date | None = None) -> None:
         print(cmd_done(areas, " ".join(args.words), today, picker))
     elif args.command == "edit":
         print(cmd_edit(areas, " ".join(args.words), today, text=args.text, section=args.section, **tags))
+    elif args.command == "drop":
+        print(cmd_drop(areas, " ".join(args.words), today))
     elif args.command == "find" and interactive():
         from .pick import pick
         print("\n".join(pick(areas, " ".join(args.words), today)) or "Nothing changed.")

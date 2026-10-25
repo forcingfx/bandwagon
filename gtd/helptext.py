@@ -22,8 +22,8 @@ Everyday
   gtd done "words"       Tick off the open task matching your words; a picker
                          opens if several match.
   gtd edit "words"       Change that task's text, list or tags (--due none).
-  gtd find "words"       Find tasks by words or tags; in a terminal, a picker
-                         to tick (Space) or star (s) them.
+  gtd drop "words"       Delete that task, as Backspace does in the app.
+  gtd find "words"       Find tasks; in a terminal, pick to tick or star them.
   gtd init PATH          Add a task file to your config, made if missing.
   gtd updates            Say whether a newer release is out.
 
@@ -86,6 +86,13 @@ COMMANDS = {
              '  gtd edit "tax certificate" --start 2027-01-15\n'
              '      Edited in home Next Actions: - [ ] Download the tax certificate\n'
              '      start:2027-01-15 due:2027-02-15'),
+    "drop": ("Delete the open task matching your words (every word, any order, text\n"
+             "or tags), as Backspace does in the app. Unless exactly one task matches,\n"
+             "nothing changes and the matches are listed. The deleted line is printed,\n"
+             "so gtd add can bring it back.",
+             'Example:\n'
+             '  gtd drop "offsite agenda"\n'
+             '      Dropped from work Next Actions: - [ ] Draft offsite agenda @computer'),
     "updates": ("Ask GitHub for the latest release and say whether it is newer than this\n"
                 "copy, with the command that upgrades it. Only this command goes online;\n"
                 "the app never checks on its own.",

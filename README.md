@@ -84,6 +84,7 @@ completions_log = "~/notes/home/completions.md"   # a table of recurring and one
 gtd add "Call Anna re Q4 budget" --context calls --due fri
 gtd done "Q4 budget"
 gtd edit "Q4 budget" --start mon --due none
+gtd drop "Q4 budget"
 gtd find passport
 gtd list --area home --section next     # JSON
 ```
@@ -92,6 +93,7 @@ gtd list --area home --section next     # JSON
 
 - **`gtd propose "text" --src LINK` suggests a task to In and records where it came from.** The area's `proposal_cap` limits proposals per day, and extras are parked in `task-overflow.md` under its `state_dir`. `proposal_reserve` keeps slots of the cap for a named caller, and a caller names itself with `--caller NAME` or `$GTD_CALLER`.
 - **`gtd edit "words"` changes the one open task matching.** `--text` rewrites it, `--section` moves it to another list, and the tag flags set a tag; a tag flag given `none` clears it. Unless exactly one task matches, nothing changes and the matches are listed.
+- **`gtd drop "words"` deletes the one open task matching,** as `⌫` does in the app. Unless exactly one task matches, nothing changes and the matches are listed. It prints the deleted line, so `gtd add` can bring it back.
 - **`gtd updates` asks GitHub for the latest release and prints the command that upgrades this copy.** It is the only command that goes online, and the app never checks on its own.
 - **`gtd expire` drops proposals left unsorted in In for seven days, and `gtd sweep` files checkboxes ticked in the file itself.** Both are meant for a timer.
 

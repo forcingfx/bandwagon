@@ -170,6 +170,18 @@ def test_edit_refuses_ambiguous_missing_or_empty(areas):
         cli.cmd_edit(areas, "rent", TODAY, due="someday soon")
 
 
+def test_drop_deletes_the_one_match_and_refuses_otherwise(areas):
+    out = cli.cmd_drop(areas, "plumber", TODAY)
+    assert out == "Dropped from home Next Actions: - [ ] Call plumber @calls"
+    assert texts(areas["home"], Section.NEXT) == ["Pay rent"]
+    assert texts(areas["home"], Section.DONE) == []
+    cli.cmd_add(areas, "work", "Pay rent twice", TODAY)
+    with pytest.raises(SystemExit, match="2 open items match"):
+        cli.cmd_drop(areas, "rent", TODAY)
+    with pytest.raises(SystemExit, match="0 open items match"):
+        cli.cmd_drop(areas, "plumber", TODAY)
+
+
 def test_updates_says_how_to_upgrade_only_when_newer(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "__version__", "0.1.0")
     assert cli.cmd_updates(lambda: "0.1.0") == "gtd 0.1.0 is the latest release."
@@ -302,7 +314,7 @@ def test_save_contexts_rewrites_only_that_line(tmp_path):
 # Help: never acts, fits 80 columns, everyday first, examples, where the docs live
 
 HELP_FORMS = [["--help"], ["-h"], ["help"]]
-SUBCOMMANDS = ["add", "propose", "done", "edit", "find", "list", "expire", "sweep", "init", "updates"]
+SUBCOMMANDS = ["add", "propose", "done", "edit", "drop", "find", "list", "expire", "sweep", "init", "updates"]
 
 
 @pytest.fixture
