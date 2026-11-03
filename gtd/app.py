@@ -164,6 +164,11 @@ def in_order(items: list) -> tuple[list, list]:
     return [i for i in items if not i.src], [i for i in items if i.src]
 
 
+def to_clarify(doc) -> list:
+    """In's open items: one ticked there is finished, so nothing is left to clarify."""
+    return [i for i in doc.items(Section.IN) if not i.done]
+
+
 def source_name(src: str) -> str:
     """A short name for where a proposal came from: granola, gmail, slack, confluence, process."""
     if "://" not in src:
@@ -1256,7 +1261,7 @@ class GTDApp(App):
 
     def allen_status(self) -> str:
         """The three things Allen watches: In at zero, every project moving, the weekly review current."""
-        inbox = len(self.doc.items(Section.IN))
+        inbox = len(to_clarify(self.doc))
         stuck = len(model.stalled_projects(self.doc))
         days = None if self.doc.last_review is None else (self.today - self.doc.last_review).days
         parts = [
@@ -1574,9 +1579,9 @@ class GTDApp(App):
         if (here is not Section.IN or self.project_view) and item is not None:
             await self.clarify(item, here, "what", prefill_from_item(item, here))
             return await self.render_lists() if self.project_view else await self.show(here)
-        first = item if here is Section.IN else None
+        first = item if here is Section.IN and item is not None and not item.done else None
         await self.show(Section.IN)
-        self.clarify_progress = (1, len(self.doc.items(Section.IN)))
+        self.clarify_progress = (1, len(to_clarify(self.doc)))
         if first is None or await self.clarify(first):
             self.load()
             await self.clarify_inbox(done=1 if first else 0)
@@ -1585,7 +1590,7 @@ class GTDApp(App):
 
     async def clarify_inbox(self, done: int = 0) -> bool:
         """Walk In to empty. Returns False if you stopped early."""
-        while inbox := sum(in_order(self.doc.items(Section.IN)), []):  # own captures first
+        while inbox := sum(in_order(to_clarify(self.doc)), []):  # own captures first
             self.clarify_progress = (done + 1, done + len(inbox))
             if not await self.clarify(inbox[0]):
                 self.clarify_progress = None
