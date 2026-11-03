@@ -657,6 +657,15 @@ def test_clarify_takes_own_captures_first(tmp_path):
     assert texts(path) == ["Proposal one", "Proposal two"]
 
 
+def test_clarify_skips_ticked_items_in_in(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text("<!-- gtd v1 -->\n\n## In\n- [x] Already done\n- [ ] Alpha\n- [ ] Beta\n")
+    app = run(path, "c", "4", "4")  # trash both open items; the ticked one is never offered
+    assert texts(path) == ["Already done"]
+    assert app.status_text.startswith("In clear")
+    assert app.clarify_progress is None
+
+
 LINKED = ("<!-- gtd v1 -->\n\n## In\n- [ ] [[reference/home/dishwasher#Seal|Dishwasher]]: wipe the seal\n"
           "- [ ] Follow up with Ben src:granola://meeting/84c0 added:2026-09-29\n"
           "- [ ] Read [the memo](https://docs.example/memo) before [[projects/maps|Maps]] review\n")
@@ -1235,6 +1244,22 @@ def test_project_page_actions_work_and_escape_returns(tmp_path):
     app = run(path, *["tab"] * 2, "enter", "space", "escape")       # tick Spec v2 from the page, then back
     assert [i.text for i in store.load(path).items(Section.DONE)] == ["Spec v2"]
     assert app.project_view is None and app.current is Section.PROJECTS
+
+
+def test_project_page_key_line_offers_a_not_c_for_new_tasks(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text(PROJECT_FILE)
+    assert "c add tasks" in run(path, *["tab"] * 2).keys_text
+    keys = run(path, *["tab"] * 2, "enter").keys_text
+    assert keys.startswith("a add task") and "c add tasks" not in keys and "Esc back" in keys
+
+
+def test_c_on_an_empty_project_page_captures_into_it(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text(PROJECT_FILE)
+    app = run(path, *["tab"] * 2, "down", "enter", "c", T("Book venue"))
+    assert app.project_view == ("main", "offsite")
+    assert ("Book venue", "offsite") in [(i.text, i.project) for i in store.load(path).items(Section.NEXT)]
 
 
 def test_a_on_a_project_page_captures_into_the_project(tmp_path):
