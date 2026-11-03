@@ -1237,6 +1237,22 @@ def test_project_page_actions_work_and_escape_returns(tmp_path):
     assert app.project_view is None and app.current is Section.PROJECTS
 
 
+def test_project_page_key_line_offers_a_not_c_for_new_tasks(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text(PROJECT_FILE)
+    assert "c add tasks" in run(path, *["tab"] * 2).keys_text
+    keys = run(path, *["tab"] * 2, "enter").keys_text
+    assert keys.startswith("a add task") and "c add tasks" not in keys and "Esc back" in keys
+
+
+def test_c_on_an_empty_project_page_captures_into_it(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text(PROJECT_FILE)
+    app = run(path, *["tab"] * 2, "down", "enter", "c", T("Book venue"))
+    assert app.project_view == ("main", "offsite")
+    assert ("Book venue", "offsite") in [(i.text, i.project) for i in store.load(path).items(Section.NEXT)]
+
+
 def test_a_on_a_project_page_captures_into_the_project(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(PROJECT_FILE)

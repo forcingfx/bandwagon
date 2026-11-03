@@ -54,6 +54,8 @@ LIST_KEYS = {
     Section.SOMEDAY: "⏎ clarify · c re-clarify · s star · h dates · ⌫ delete · a capture",
     Section.DONE: "space reopen · x mark · ⌫ delete",
 }
+# Inside a project page the list is the project's tasks, not the Projects list.
+PROJECT_PAGE_KEYS = "a add task · ⏎ edit · c re-clarify · space tick · s star · h dates · ⌫ delete · Esc back"
 KEYS_TAIL = "z undo · ← → lists · v vault · d later · w review · / search · ? keys"
 # Every key, grouped, for the ? screen.
 HELP = [
@@ -1219,6 +1221,9 @@ class GTDApp(App):
             return row
         return Content.assemble(head, action.truncate(room - 1), Content("…"), tail)
 
+    def list_keys(self) -> str:
+        return PROJECT_PAGE_KEYS if self.project_view else LIST_KEYS[self.current]
+
     def update_status(self) -> None:
         """Line 1: Allen's status, or the review step. Line 2: the keys that matter right now."""
         if self.review_step is not None:
@@ -1228,7 +1233,7 @@ class GTDApp(App):
                                                    if i == n else ((name, "dim"),))])
             instruction = REVIEW_STEPS[n][1].split(" · ", 1)[-1]
             self.status_text = f"Review {n + 1}/{len(REVIEW_STEPS)} · {bar.plain} · {instruction}"
-            hints = f"n next step · Esc stop · {LIST_KEYS[self.current]}"
+            hints = f"n next step · Esc stop · {self.list_keys()}"
             self.keys_text = hints
             self.query_one("#status", Static).update(Content.assemble(
                 (f"Review {n + 1}/{len(REVIEW_STEPS)} · ", "bold"), bar, (f" · {instruction}", "")))
@@ -1238,7 +1243,7 @@ class GTDApp(App):
             self.status_text = self.allen_status()
             hints = f"{len(self.marked)} marked · ⌫ delete marked · x unmark · Esc clear marks"
         else:
-            self.status_text, hints = self.allen_status(), f"{LIST_KEYS[self.current]} · {KEYS_TAIL}"
+            self.status_text, hints = self.allen_status(), f"{self.list_keys()} · {KEYS_TAIL}"
         self.keys_text = hints
         overdue = self.doc.last_review is None or (self.today - self.doc.last_review).days > 7
         chip: list = []
@@ -1556,9 +1561,11 @@ class GTDApp(App):
     @work(exclusive=True)
     async def action_clarify(self) -> None:
         """c. On In: clarify from the highlighted item, then the rest of In. On a project:
-        capture tasks into it. Anywhere else: re-clarify the highlighted item, every row
+        capture tasks into it, as on an empty project page. Anywhere else: re-clarify the highlighted item, every row
         prefilled, so any answer can change (this is also how an item moves between lists)."""
         item = self.selected()
+        if self.project_view and item is None:  # an empty project page: add its first tasks
+            return self.action_capture()
         here = self.section_of(item) if item is not None else self.current
         if here is Section.PROJECTS and item is not None:
             await self.clarify(item, None, "tasks",
