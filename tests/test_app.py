@@ -44,11 +44,11 @@ def test_clarify_three_branches(tmp_path):
         run(path, "a", T(text))
     run(path, "c",
         # Old flyer: trash
-        "4",
+        "enter", "4",
         # Reply to Jen: one action (its text becomes the action), do it now
-        "1", "2",
+        "enter", "1", "2",
         # Budget offsite: project, outcome accepted, one task, deferred to @computer, no dates
-        "2", T(""), T("Draft agenda"), "1", "2", "enter")
+        "enter", "2", T(""), T("Draft agenda"), "1", "2", "enter")
     doc = store.load(path)
     assert doc.items(Section.IN) == []
     assert [i.text for i in doc.items(Section.DONE)] == ["Reply to Jen"]
@@ -60,7 +60,7 @@ def test_clarify_three_branches(tmp_path):
 def test_delegate_goes_to_waiting_for(tmp_path):
     path = tmp_path / "gtd.md"
     run(path, "a", T("Board brief"))
-    run(path, "c", "1", "3", T("Mike"), "enter")
+    run(path, "c", "enter", "1", "3", T("Mike"), "enter")
     [waiting] = store.load(path).items(Section.WAITING)
     assert (waiting.text, waiting.waiting) == ("Board brief", "mike")
 
@@ -94,7 +94,7 @@ def test_edit_rewrites_line_and_tags(tmp_path):
 def test_reclarify_moves_a_next_action_to_someday(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text("<!-- gtd v1 -->\n\n## Next Actions\n- [ ] Learn Italian @home\n")
-    run(path, "right", "c", "3")      # re-clarify: every row prefilled; 3 = Someday/Maybe
+    run(path, "right", "c", "enter", "3")      # re-clarify: every row prefilled; 3 = Someday/Maybe
     doc = store.load(path)
     assert [i.text for i in doc.items(Section.SOMEDAY)] == ["Learn Italian"] and doc.items(Section.NEXT) == []
 
@@ -109,7 +109,7 @@ def test_shortcuts_are_ignored_while_a_question_is_open(tmp_path):
 def test_clarify_back_and_forth_changes_the_answer(tmp_path):
     path = tmp_path / "gtd.md"
     run(path, "a", T("Budget offsite"))
-    run(path, "c",
+    run(path, "c", "enter",
         "2", T(""),          # a project, outcome accepted
         "escape", "escape",  # back from Tasks to Outcome, then to Type
         "1",                 # change mind: one action (its text fills Action)
@@ -151,16 +151,16 @@ def test_capture_highlights_the_new_item(tmp_path):
 def test_c_after_capture_clarifies_the_new_item_first(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text("<!-- gtd v1 -->\n\n## In\n- [ ] Old item\n")
-    run(path, "a", T("New item"), "c", "4", "0")  # trash the new item, then stop on the old one
+    run(path, "a", T("New item"), "c", "enter", "4", "0")  # trash the new item, then stop on the old one
     assert [i.text for i in store.load(path).items(Section.IN)] == ["Old item"]
 
 
 def test_c_continues_through_rest_of_in_from_the_top(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text("<!-- gtd v1 -->\n\n## In\n- [ ] First\n- [ ] Second\n- [ ] Third\n")
-    run(path, "down", "down", "down", "c",
+    run(path, "down", "down", "down", "c", "enter",
               "4",   # Third (highlighted): trash
-              "4")   # then First from the top: trash
+              "enter", "4")   # then First from the top: trash
     assert [i.text for i in store.load(path).items(Section.IN)] == ["Second"]
 
 
@@ -168,7 +168,7 @@ def test_tab_keeps_capturing_enter_closes(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text("<!-- gtd v1 -->\n\n## In\n- [ ] Old item\n")
     run(path, "a", *"One", "tab", *"Two", "tab", T("Three"),  # Enter on the last one closes
-        "c", "4", "0")                                               # clarify starts on "One": trash it, stop
+        "c", "enter", "4", "0")                                      # clarify starts on "One": trash it, stop
     assert [i.text for i in store.load(path).items(Section.IN)] == ["Old item", "Two", "Three"]
 
 
@@ -188,7 +188,7 @@ def test_up_down_move_within_a_list(tmp_path):
 def test_up_down_pick_options_in_the_card(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text("<!-- gtd v1 -->\n\n## In\n- [ ] Learn Italian\n")
-    run(path, "c", "down", "down", "down", "up", "enter")   # Type row: 3rd option = Someday/Maybe
+    run(path, "c", "enter", "down", "down", "down", "up", "enter")   # Type row: 3rd option = Someday/Maybe
     assert [i.text for i in store.load(path).items(Section.SOMEDAY)] == ["Learn Italian"]
 
 
@@ -322,20 +322,20 @@ def test_escape_stops_review_without_recording(tmp_path):
     assert store.load(path).last_review is None
 
 
-def test_enter_clarifies_an_in_item_and_edits_elsewhere(tmp_path):
+def test_enter_opens_the_card_title_first_on_any_list(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(TWO_IN)
-    run(path, "down", "down", "enter", "4", "0")        # Enter on Beta clarifies it: trash; then stop
+    run(path, "down", "down", "enter", "enter", "4", "0")        # Enter on Beta clarifies it: trash; then stop
     assert [i.text for i in store.load(path).items(Section.IN)] == ["Alpha"]
     path.write_text("<!-- gtd v1 -->\n\n## Next Actions\n- [ ] Call Fred @calls\n")
-    run(path, "tab", "enter", "ctrl+u", T("Call Fred re brakes @calls"))
+    run(path, "tab", "enter", "ctrl+u", T("Call Fred re brakes"), "enter", "enter", "enter", "enter")  # keep the rest
     assert store.load(path).items(Section.NEXT)[0].text == "Call Fred re brakes"
 
 
 def test_c_on_someday_item_clarifies_it_into_a_project(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text("<!-- gtd v1 -->\n\n## Someday/Maybe\n- [ ] Learn Italian\n")
-    app = run(path, *["tab"] * 4, "c", "2", T(""), T("Book a trial lesson"), "1", "1", "enter")
+    app = run(path, *["tab"] * 4, "c", "enter", "2", T(""), T("Book a trial lesson"), "1", "1", "enter")
     doc = store.load(path)
     assert doc.items(Section.SOMEDAY) == []
     assert [p.text for p in doc.items(Section.PROJECTS)] == ["Learn Italian"]
@@ -362,7 +362,7 @@ def test_j_k_move_and_left_is_not_back_in_pop_ups(tmp_path):
     run(path, "j", "j", "k", "space")          # j/k move like ↓/↑: down to Beta, back up to Alpha
     assert [i.text for i in store.load(path).items(Section.DONE)] == ["Alpha"]
     path.write_text(TWO_IN)
-    run(path, "down", "c", "left", "3")        # left is not "back" in the card: 3 still picks Someday
+    run(path, "down", "c", "enter", "left", "3")        # left is not "back" in the card: 3 still picks Someday
     assert [i.text for i in store.load(path).items(Section.SOMEDAY)] == ["Alpha"]
 
 
@@ -444,9 +444,9 @@ def test_actions_toast_what_happened(tmp_path):
     path.write_text(TWO_IN)
     assert run(path, "down", "backspace").last_toast == "Deleted “Alpha” · z to undo"
     path.write_text(TWO_IN)
-    assert run(path, "down", "c", "3").last_toast == "Moved “Alpha” to Someday/Maybe · z to undo"
+    assert run(path, "down", "c", "enter", "3").last_toast == "Moved “Alpha” to Someday/Maybe · z to undo"
     path.write_text(TWO_IN)
-    assert run(path, "c", "1", "1", "1", "enter").last_toast == "Deferred “Alpha” to @calls · z to undo"
+    assert run(path, "c", "enter", "1", "1", "1", "enter").last_toast == "Deferred “Alpha” to @calls · z to undo"
 
 
 THREE_IN = "<!-- gtd v1 -->\n\n## In\n- [ ] Alpha\n- [ ] Beta\n- [ ] Gamma\n"
@@ -655,7 +655,7 @@ def test_arrows_cross_the_proposals_divider(tmp_path):
 def test_clarify_takes_own_captures_first(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(MIXED_IN)
-    run(path, "c", "4", "4", "0")  # trash the first two clarified, then stop
+    run(path, "c", "enter", "4", "enter", "4", "0")  # trash the first two clarified, then stop
     assert texts(path) == ["Proposal one", "Proposal two"]
 
 
@@ -822,26 +822,29 @@ def test_several_contexts_round_trip_and_split():
     assert item.line() == "- [ ] Pick up the parcel @errands @calls +move added:2026-09-29"
 
 
-def test_context_picker_number_picks_one_enter_and_space_tick_several(tmp_path):
+def test_context_picker_space_ticks_and_enter_goes_on_with_them(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(TWO_IN)
-    run(path, "c", "1", "1", "2", "enter")                       # number: @computer alone, instantly; no dates
+    run(path, "c", "enter", "1", "1", "2", "enter")                       # number: @computer alone, instantly; no dates
     assert store.load(path).items(Section.NEXT)[0].context == "@computer"
     path.write_text(TWO_IN)
-    run(path, "c", "1", "1", "enter", "down", "down", "enter", "enter", "enter")  # tick @calls, @computer; Next step
+    run(path, "c", "enter", "1", "1", "enter", "enter")                   # Enter: the highlighted one, on; no dates
+    assert store.load(path).items(Section.NEXT)[0].context == "@calls"
+    path.write_text(TWO_IN)
+    run(path, "c", "enter", "1", "1", "space", "down", "enter", "enter")  # tick @calls, Enter on @computer: both, on
     assert store.load(path).items(Section.NEXT)[0].contexts == ["@calls", "@computer"]
     path.write_text(TWO_IN)
-    run(path, "c", "1", "1", "space", "down", "space", "up", "up", "enter", "enter")  # Space ticks in place
+    run(path, "c", "enter", "1", "1", "space", *"comp", "space", "enter", "enter")  # search, tick, Enter on the ticked one
     assert store.load(path).items(Section.NEXT)[0].contexts == ["@calls", "@computer"]
 
 
 def test_context_picker_searches_as_you_type_and_adds_a_new_one(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(TWO_IN)
-    run(path, "c", "1", "1", *"err", "enter", "enter", "enter")  # the only match: @errands; Next step; no dates
+    run(path, "c", "enter", "1", "1", *"err", "enter", "enter")          # the only match: @errands; no dates
     assert store.load(path).items(Section.NEXT)[0].context == "@errands"
     path.write_text(TWO_IN)
-    run(path, "c", "1", "1", "space", *"gar", "enter", "enter", "enter")  # tick @calls, New context @gar; on
+    run(path, "c", "enter", "1", "1", "space", *"gar", "enter", "enter", "enter")  # tick @calls, add @gar, Enter on; no dates
     doc = store.load(path)
     assert doc.items(Section.NEXT)[0].contexts == ["@calls", "@gar"] and doc.contexts[-1] == "@gar"
 
@@ -867,10 +870,10 @@ PROJECTS_IN = ("<!-- gtd v1 -->\n\n## In\n- [ ] Draft agenda\n\n## Projects\n- [
 def test_clarify_asks_for_a_project_and_enter_skips(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(PROJECTS_IN)
-    run(path, "c", "1", "enter", "1", "1", "enter")            # Enter: no project; defer to @calls; no dates
+    run(path, "c", "enter", "1", "enter", "1", "1", "enter")            # Enter: no project; defer to @calls; no dates
     assert store.load(path).items(Section.NEXT)[0].project is None
     path.write_text(PROJECTS_IN)
-    run(path, "c", "1", "3", "1", "1", "enter")                # 3: Q4 offsite plan
+    run(path, "c", "enter", "1", "3", "1", "1", "enter")                # 3: Q4 offsite plan
     assert store.load(path).items(Section.NEXT)[0].project == "q4-offsite"
 
 
@@ -1046,29 +1049,29 @@ def test_date_screen_tab_goes_straight_to_start(tmp_path):
 def test_clarify_has_an_optional_dates_step(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(ONE_IN)
-    run(path, "c", "1", "1", "1", "enter")                      # one action, defer, @calls, Enter skips dates
+    run(path, "c", "enter", "1", "1", "1", "enter")                      # one action, defer, @calls, Enter skips dates
     assert (next_item(path).context, next_item(path).due) == ("@calls", None)
     path.write_text(ONE_IN)
-    run(path, "c", "1", "1", "1", *"dec 5", "enter", "enter")
+    run(path, "c", "enter", "1", "1", "1", *"dec 5", "enter", "enter")
     assert str(next_item(path).due) == "2026-12-05"
 
 
 def test_delegate_can_set_dates(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(ONE_IN)
-    run(path, "c", "1", "3", T("Mike"), *"fri", "enter", "enter")
+    run(path, "c", "enter", "1", "3", T("Mike"), *"fri", "enter", "enter")
     item = store.load(path).items(Section.WAITING)[0]
     assert (item.waiting, str(item.due)) == ("mike", "2026-10-02")
 
 
 def test_card_rows_follow_the_answers():
     from gtd.clarify import card_rows
-    assert card_rows({}, "what", True) == ["what", "action", "project", "how", "context", "dates"]
-    assert card_rows({}, "what", False) == ["what", "action", "how", "context", "dates"]
-    assert card_rows({"kind": "project"}, "what", True) == ["what", "outcome", "tasks", "how", "context", "dates"]
-    assert card_rows({"actionable": False}, "what", True) == ["what"]
-    assert card_rows({"how": "now"}, "what", False) == ["what", "action", "how"]
-    assert card_rows({"how": "delegate"}, "what", False) == ["what", "action", "how", "who", "dates"]
+    assert card_rows({}, "what", True) == ["title", "what", "action", "project", "how", "context", "dates"]
+    assert card_rows({}, "what", False) == ["title", "what", "action", "how", "context", "dates"]
+    assert card_rows({"kind": "project"}, "what", True) == ["title", "what", "outcome", "tasks", "how", "context", "dates"]
+    assert card_rows({"actionable": False}, "what", True) == ["title", "what"]
+    assert card_rows({"how": "now"}, "what", False) == ["title", "what", "action", "how"]
+    assert card_rows({"how": "delegate"}, "what", False) == ["title", "what", "action", "how", "who", "dates"]
     assert card_rows({"locked_project": True}, "tasks", True) == ["tasks", "how", "context", "dates"]
 
 
@@ -1079,7 +1082,7 @@ def test_card_fills_the_action_and_never_asks_for_it(tmp_path):
     async def go():
         app = GTDApp(path, today=TODAY)
         async with app.run_test(size=(100, 30)) as pilot:
-            await pilot.press("c", "1"); await pilot.pause()
+            await pilot.press("c", "enter", "1"); await pilot.pause()
             card = app.screen
             rows = card.query_one("#card-rows").render().plain
             return type(card).__name__, card.step, card.query_one("#card-title").render().plain, rows
@@ -1127,7 +1130,7 @@ def test_space_on_an_obsidian_tick_unticks_it_in_place(tmp_path):
 def test_j_k_move_in_the_card(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(TWO_IN)
-    run(path, "c", "j", "j", "j", "k", "j", "enter")   # Type row, 4th option = Trash
+    run(path, "c", "enter", "j", "j", "j", "k", "j", "enter")   # Type row, 4th option = Trash
     doc = store.load(path)
     assert [i.text for i in doc.items(Section.IN)] == ["Beta"] and doc.items(Section.SOMEDAY) == []
 
@@ -1142,7 +1145,7 @@ def test_v_cycles_the_vault_view(tmp_path):
 def test_project_with_several_tasks(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text("<!-- gtd v1 -->\n\n## In\n- [ ] Q4 offsite\n")
-    run(path, "c", "2", T(""), *"Book venue", "tab", *"Draft agenda", "tab", T("Invite team"), "1", "2", "enter")
+    run(path, "c", "enter", "2", T(""), *"Book venue", "tab", *"Draft agenda", "tab", T("Invite team"), "1", "2", "enter")
     doc = store.load(path)
     [project] = doc.items(Section.PROJECTS)
     nexts = [(i.text, i.context, i.project) for i in doc.items(Section.NEXT)]
@@ -1161,7 +1164,7 @@ def test_c_on_a_project_captures_tasks_into_it(tmp_path):
 def test_reclarify_moves_a_next_action_to_waiting_for(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text("<!-- gtd v1 -->\n\n## Next Actions\n- [ ] Budget numbers @computer every:monthly due:2026-10-01\n")
-    run(path, "right", "c", "1", "3", "ctrl+u", T("Maciej"), "enter", "enter")   # delegate to Maciej; keep dates
+    run(path, "right", "c", "enter", "1", "3", "ctrl+u", T("Maciej"), "enter", "enter")   # delegate to Maciej; keep dates
     doc = store.load(path)
     [waiting] = doc.items(Section.WAITING)
     assert (waiting.text, waiting.waiting, waiting.every, str(waiting.due)) == \
@@ -1173,7 +1176,7 @@ def test_reclarify_an_item_that_has_a_start_date(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text("<!-- gtd v1 -->\n\n## Next Actions\n"
                     "- [ ] Budget numbers @computer start:2026-09-20 due:2026-10-01\n")
-    run(path, "right", "c", "1", "3", "ctrl+u", T("Maciej"), "enter", "enter")   # delegate; keep dates
+    run(path, "right", "c", "enter", "1", "3", "ctrl+u", T("Maciej"), "enter", "enter")   # delegate; keep dates
     [waiting] = store.load(path).items(Section.WAITING)      # start: is an answer name, not a card row
     assert (waiting.text, str(waiting.start), str(waiting.due)) == \
         ("Budget numbers", "2026-09-20", "2026-10-01")
@@ -1211,7 +1214,7 @@ def test_m_searches_projects_as_you_type(tmp_path):
 def test_l_sets_contexts_and_p_moves_to_waiting(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(FIELD_FILE)
-    run(path, "right", "l", "down", "down", "enter", "enter")    # @calls is already ticked; add @computer
+    run(path, "right", "l", "down", "enter")             # @calls is already ticked; Enter on @computer: both
     assert next_item(path).contexts == ["@calls", "@computer"]
     path.write_text(FIELD_FILE)
     run(path, "right", "p", T("Mike"))
@@ -1590,7 +1593,7 @@ def test_clarifying_an_in_item_keeps_what_it_already_says(tmp_path):
     assert carried_from_item(store.parse_item("- [ ] Bare")) == {"known": []}
     path = tmp_path / "gtd.md"
     path.write_text(CARRIED_IN)
-    run(path, "c", "1", "1")                                    # one action, defer: project, context, due carried
+    run(path, "c", "enter", "1", "1")                                    # one action, defer: project, context, due carried
     [item] = store.load(path).items(Section.NEXT)
     assert (item.project, item.context, str(item.due)) == ("q4-offsite", "@calls", "2026-11-20")
     assert store.load(path).items(Section.IN) == []
@@ -1599,7 +1602,7 @@ def test_clarifying_an_in_item_keeps_what_it_already_says(tmp_path):
 def test_escape_goes_back_to_a_carried_row_to_change_it(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(CARRIED_IN)
-    run(path, "c", "1", "1", "escape", "escape", "enter", "1", "enter")  # back past dates and context to how; defer; @calls
+    run(path, "c", "enter", "1", "1", "escape", "escape", "enter", "1", "enter")  # back past dates and context to how; defer; @calls
     [item] = store.load(path).items(Section.NEXT)
     assert item.project == "q4-offsite" and item.context == "@calls"
 
@@ -1631,7 +1634,7 @@ def test_e_edits_only_the_title_and_keeps_the_tags(tmp_path):
 def test_the_clarify_card_edits_the_title_and_keeps_the_tags(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(CARRIED_IN)
-    run(path, "c", "e", "ctrl+u", T("Tell Mike no"), "1", "1")    # retitle, one action, defer: the rest carried
+    run(path, "c", "ctrl+u", T("Tell Mike no"), "1", "1")    # the Title row, one action, defer: the rest carried
     [item] = store.load(path).items(Section.NEXT)
     assert (item.text, item.project, item.context, str(item.due)) == ("Tell Mike no", "q4-offsite", "@calls", "2026-11-20")
 

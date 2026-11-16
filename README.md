@@ -69,12 +69,12 @@ completions_log = "~/notes/home/completions.md"   # a table of recurring and one
 **`?` shows every key, and `/` searches tasks and commands in one box.** Every pop-up answers to a number, and `Esc` goes back one step with nothing written.
 
 - **`a` captures.** `Enter` saves and closes. `Tab` saves and clears the box for the next item.
-- **`c` clarifies, walking In to empty through Allen's questions on one card:** what is it, what is the next action, which project, and whether to defer, delegate or do it now, then a context and dates. `c` on any item re-opens the card prefilled, which is how an item moves between lists. `m`, `l`, `h` and `p` open the card on one row: project, context, dates, waiting for.
+- **`c` clarifies, walking In to empty through Allen's questions on one card:** the title first (`Enter` keeps it; tags typed at its end count as answers), then what is it, what is the next action, which project, and whether to defer, delegate or do it now, then a context and dates. A task's own tags are kept and their rows ticked. `Enter` or `c` on any item re-opens the card prefilled, which is how an item moves between lists; on Done, `Enter` edits the title. `m`, `l`, `h` and `p` open the card on one row: project, context, dates, waiting for.
 - **The lists are where you organize.** `Space` ticks, `e` edits the text, `⌫` deletes, `x` marks rows for one bulk delete, and `z` undoes any of these one step per press. `Enter` on a project opens its page.
 - **`w` runs the weekly review as a guided tour of the lists in the book's order.** The status line shows the step and what to do in it. `n` moves on, and the last `n` records the review date.
 - **`f` filters Next Actions by context.** Next Actions groups one-off tasks by project with unassigned tasks first, and recurring tasks sit in their own block.
 - **`s` stars an item for Focus.** Focus is a tab after In that lists every starred item across every area until it is done or unstarred. `d` shows or hides deferred tasks, whose start date is still ahead.
-- **`v` cycles the vaults, `L` edits the showing vault's contexts and `F` edits the files and vaults.** The Project and Context rows are search boxes: type to narrow and `Enter` takes. On the Context row `Enter` ticks a context and waits on the Next step row, so several can be ticked before moving on; a number takes one context and moves on at once. The last row creates a new entry from the words typed, and a new context joins the vault's list.
+- **`v` cycles the vaults, `L` edits the showing vault's contexts and `F` edits the files and vaults.** The Project and Context rows are search boxes: type to narrow and `Enter` takes. On the Context row `Space` ticks a context and `Enter` moves on with the ticked ones plus the highlighted one; a number takes just that context and moves on. The last row creates a new entry from the words typed, and a new context joins the vault's list.
 
 ## The command line
 

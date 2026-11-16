@@ -61,7 +61,7 @@ HELP = [
     ("Move", [("↑ ↓ or j k", "move through the list"), ("Home End", "first / last item"),
               ("PgUp PgDn", "a page up / down"), ("← → u i Tab ⇧Tab", "previous / next list (or click a tab)"),
               ("⇧↑ ⇧↓", "select rows from here, like a file manager")]),
-    ("Act on the highlighted item", [("⏎", "clarify In/Someday · next action for a project · edit"),
+    ("Act on the highlighted item", [("⏎", "open: the clarify card, title first · a project's page · on Done, the title"),
                                      ("Space", "tick (or click the checkbox); on a ticked row untick; on Done reopen"),
                                      ("o", "open a link in the item (a picker if it has several)"),
                                      ("x", "mark for a bulk delete"), ("⌫ Del", "delete the marked rows, or this one"),
@@ -2067,8 +2067,8 @@ class GTDApp(App):
         await self.action_review_stop()
 
     async def action_primary(self) -> None:
-        """Enter: the obvious thing for this list. Clarify on In and Someday, add a next
-        action on Projects, edit everywhere else."""
+        """Enter: open the item. Its project's page on Projects, the title on Done, and
+        everywhere else the clarify card, every row prefilled, starting at the title."""
         kind, value = self.highlighted_row()
         if kind == "more":
             return await self.toggle_group(value[0])
@@ -2077,10 +2077,10 @@ class GTDApp(App):
         item = self.selected()
         if self.current is Section.PROJECTS and not self.project_view and item.project:
             return await self.open_project(item)
-        if self.section_of(item) in (Section.IN, Section.SOMEDAY):
-            self.action_clarify()
-        else:
+        if self.section_of(item) is Section.DONE:
             self.action_edit()
+        else:
+            self.action_clarify()
 
     def action_help(self) -> None:
         self.push_screen(HelpScreen())

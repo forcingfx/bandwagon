@@ -1,7 +1,8 @@
 """The clarify card: one screen for Allen's processing questions.
 
-The item is shown once at the top. Every question is a row (Type, Action or Outcome and
-Tasks, Project, How, Context or Who, Dates); answered rows show ✓ and their value, the
+The item is shown once at the top. Every question is a row (Title, Type, Action or Outcome
+and Tasks, Project, How, Context or Who, Dates); the Title row comes first, prefilled, so
+Enter keeps the words and typing changes them (tags typed at the end count as answers); answered rows show ✓ and their value, the
 active row ▸ opens its picker below, and later rows show —. A one-action item's action is
 filled in from its own text, so the card never asks for it twice (e rephrases it).
 
@@ -29,7 +30,7 @@ from . import dates, model
 from .datescreen import DatePicker
 from .model import Section
 
-ROW_NAMES = {"what": "Type", "outcome": "Outcome", "tasks": "Tasks", "action": "Action", "project": "Project",
+ROW_NAMES = {"title": "Title", "what": "Type", "outcome": "Outcome", "tasks": "Tasks", "action": "Action", "project": "Project",
              "how": "How", "context": "Context", "who": "Who", "dates": "Dates"}
 TYPES = ["One action", "A project (more than one step)", "Someday/Maybe (incubate)", "Trash",
          "Reference: file it in Obsidian"]
@@ -44,6 +45,8 @@ OPTION_STEPS = {"what", "project", "how", "context"}
 
 def next_step(step: str, a: dict, has_projects: bool) -> str:
     """The row after `step`, given the answers so far; "commit" when the card is done."""
+    if step == "title":
+        return "what"
     if step == "what":
         if not a.get("actionable", True):
             return "commit"
@@ -69,7 +72,7 @@ def card_rows(a: dict, start: str, has_projects: bool) -> list[str]:
     """Every row the card shows for the answers so far; unanswered choices are assumed to
     take the default branch (one action, deferred)."""
     if start == "what":
-        rows = ["what"]
+        rows = ["title", "what"]
         if not a.get("actionable", True):
             return rows
         if a.get("kind") == "project":
@@ -128,7 +131,7 @@ def row_value(step: str, a: dict, project_titles: dict[str, str]) -> str | None:
     """What an answered row shows, or None while it is unanswered."""
     if step == "what":
         return TYPE_SHORT.get(a.get("choice"))
-    if step in ("outcome", "action", "who"):
+    if step in ("title", "outcome", "action", "who"):
         return a.get(step)
     if step == "tasks":
         tasks = a.get("tasks") or []
@@ -212,7 +215,7 @@ class ClarifyScreen(ModalScreen):
         self.progress, self.area, self.area_colour, self.source = progress, area, area_colour, source
         self.fields = fields                                  # single-row mode when set
         self.date_state = date_state
-        self.step = fields[0] if fields else start
+        self.step = fields[0] if fields else "title" if start == "what" else start
         self.history: list[str] = []
         self.sub: str | None = None                           # "new_project" or "other_context" text entry
         self.project_choices: list[tuple[str, str | None]] = []  # the project search's rows: (kind, slug or text)
@@ -262,7 +265,7 @@ class ClarifyScreen(ModalScreen):
         here = rows.index(self.step) if self.step in rows else len(rows)
         for n, step in enumerate(rows):
             value = row_value(step, self.a, self.titles)
-            if value and step in ("action", "outcome") and value == self.item.text:
+            if value and step in ("title", "action", "outcome") and value == self.item.text:
                 value = "as written above"                    # never repeat the item on the card
             room = self.ROW_ROOM - (13 if step == "action" and self.a.get("kind") == "single" else 0)
             if value and len(value) > room:                   # one line per row
@@ -284,9 +287,11 @@ class ClarifyScreen(ModalScreen):
             return "Enter confirm · Esc back"
         return {"tasks": "Tab add another · Enter done · Esc back",
                 "project": "type to search · ↑↓ move · Enter take · 1-9 pick (empty box) · Esc back",
-                "context": "type to search · Enter or Space tick · → Next step row goes on · 1-9 take one and go on · Esc back",
+                "context": ("Space tick · Enter go on" + (f" with {' '.join(self.toggled)} +this" if self.toggled else "")
+                            + " · 1-9 just that one · type to search · Esc back"),
                 "dates": "↑↓ pick · Enter take · Tab due/start · Esc back",
-                "what": "1-9 pick · j k move · Enter take · e edit the title · Esc back",
+                "title": "Enter keep or change the title · tags at the end (@context +project) count · Esc back",
+                "what": "1-9 pick · j k move · Enter take · e back to the title · Esc back",
                 }.get(
             self.step, "1-9 pick · j k move · Enter take · Esc back" if self.step in OPTION_STEPS
             else "Enter confirm · Esc back")
@@ -343,11 +348,10 @@ class ClarifyScreen(ModalScreen):
             self.context_choices.append(("new", typed))
         elif not words:
             self.context_choices += [("new", None), ("edit", None)]
-        self.redraw_contexts("1" if words else None)   # searching: the first match, not Next step
+        self.redraw_contexts("1" if words else None)
 
     def redraw_contexts(self, highlight: str | None) -> None:
-        """The rows, by id: "done" (only once something is ticked) on top, unnumbered, so
-        the numbers 1-9 keep meaning the same contexts; then the choices, numbered."""
+        """The choices, numbered; their ids are those numbers."""
         def label(kind: str, value: str | None) -> str:
             if kind == "ctx":
                 return f"{'[x]' if value in self.toggled else '[ ]'} {value}"
@@ -357,11 +361,10 @@ class ClarifyScreen(ModalScreen):
         widget = self.query_one("#context-results", OptionList)
         widget.clear_options()
         rows = [Option(Content(f"{n}  {label(k, v)}"), id=str(n)) for n, (k, v) in enumerate(self.context_choices, 1)]
-        if self.toggled:
-            rows.insert(0, Option(Content.assemble(("→  Next step with ", "bold"), (" ".join(self.toggled), "bold")),
-                                  id="done"))
         widget.add_options(rows)
         ids = [o.id for o in rows]
+        ticked = [str(n) for n, (k, v) in enumerate(self.context_choices, 1) if v in self.toggled]
+        highlight = highlight if highlight in ids else (ticked[0] if ticked else None)  # Enter adds nothing unasked
         widget.highlighted = ids.index(highlight) if highlight in ids else (0 if rows else None)
 
     def context_row(self) -> str | None:
@@ -375,7 +378,9 @@ class ClarifyScreen(ModalScreen):
         if self.query_one("#context-search", Input).value:   # searched for it: clear for the next one
             self.query_one("#context-search", Input).value = ""
             self.fill_contexts("")
+            row = next((str(n) for n, (k, v) in enumerate(self.context_choices, 1) if v == c), None)
         self.redraw_contexts(row)
+        self.query_one("#card-hint", Static).update(self.hint())
 
     @on(Input.Changed, "#context-search")
     def context_typed(self, event: Input.Changed) -> None:
@@ -419,10 +424,10 @@ class ClarifyScreen(ModalScreen):
         if step == "tasks":
             return Vertical(Static(self.tasks_list(), id="tasks-list"),
                             TaskInput(placeholder="A task for this project", id="task-input"), id="tasks-box")
-        value = {"outcome": a.get("outcome", self.item.text), "action": a.get("action", self.item.text),
-                 "who": a.get("who", "")}[step]
-        placeholder = {"outcome": "What does done look like?", "action": "The next physical, visible action",
-                       "who": "Waiting for whom?"}[step]
+        value = {"title": self.item.text, "outcome": a.get("outcome", self.item.text),
+                 "action": a.get("action", self.item.text), "who": a.get("who", "")}[step]
+        placeholder = {"title": "What is it?", "outcome": "What does done look like?",
+                       "action": "The next physical, visible action", "who": "Waiting for whom?"}[step]
         return Input(value=value, placeholder=placeholder, id="text")
 
     def tasks_list(self) -> Content:
@@ -472,8 +477,6 @@ class ClarifyScreen(ModalScreen):
         if step == "how":
             return await self.answer(how=HOW_CODES[n - 1])
         if step == "context":
-            if n == 0:                                        # the Next step row: the ticked ones
-                return await self.answer(context=" ".join(self.toggled) or None)
             kind, value = self.context_choices[n - 1]
             if kind == "edit":
                 return await self.action_rephrase()
@@ -484,7 +487,7 @@ class ClarifyScreen(ModalScreen):
                 return self.add_context(value)
             if alone:                                         # a number: this one alone, and on
                 return await self.answer(context=value)
-            return self.tick(value, "done")                   # Enter: tick it; the cursor waits on Next step
+            return await self.answer(context=" ".join(dict.fromkeys([*self.toggled, value])))  # Enter: ticked + this, on
 
     async def on_key(self, event) -> None:
         if self.step in OPTION_STEPS and not self.sub and event.character and event.character.isdigit():
@@ -500,6 +503,8 @@ class ClarifyScreen(ModalScreen):
             self.toggled = self.toggled + [name]
         self.query_one("#context-search", Input).value = ""
         self.fill_contexts("")
+        self.redraw_contexts(next(str(n) for n, (k, v) in enumerate(self.context_choices, 1) if v == name))
+        self.query_one("#card-hint", Static).update(self.hint())
 
     async def pick_number(self, n: int) -> None:
         limit = {"what": len(TYPES), "how": len(HOWS), "project": len(self.project_choices),
@@ -512,7 +517,7 @@ class ClarifyScreen(ModalScreen):
         if self.step not in OPTION_STEPS or self.sub:
             return
         event.stop()
-        await self.choose(0 if event.option.id == "done" else int(event.option.id))
+        await self.choose(int(event.option.id))
 
     @on(Input.Submitted)
     async def submitted(self, event: Input.Submitted) -> None:
@@ -520,7 +525,7 @@ class ClarifyScreen(ModalScreen):
         text = event.value.strip()
         if self.step == "context" and not self.sub:
             if (row := self.context_row()) is not None:
-                await self.choose(0 if row == "done" else int(row))
+                await self.choose(int(row))
             return
         if self.step == "project" and not self.sub:
             widget = self.query_one("#project-results", OptionList)
@@ -541,6 +546,11 @@ class ClarifyScreen(ModalScreen):
             return
         if self.step == "tasks":
             return await self.add_task(keep_going=False)
+        if self.step == "title":
+            if text:
+                self.apply_title(text)
+                await self.answer(title=self.item.text)
+            return
         if not text and self.step != "who":
             return
         if self.step == "who" and not text:
@@ -569,7 +579,7 @@ class ClarifyScreen(ModalScreen):
         if self.step != "context" or self.sub:
             return
         row = self.context_row()
-        if row is None or row == "done" or self.context_choices[int(row) - 1][0] != "ctx":
+        if row is None or self.context_choices[int(row) - 1][0] != "ctx":
             return
         self.tick(self.context_choices[int(row) - 1][1], row)
 
@@ -596,10 +606,8 @@ class ClarifyScreen(ModalScreen):
                                         callback=self.contexts_edited)
         if self.fields:
             return
-        if self.step == "what" and hasattr(self.app, "action_manage_contexts"):
-            from .app import TextScreen
-            prompt = "Title (its tags stay; add one at the end: @context +project)"
-            return self.app.push_screen(TextScreen(prompt, self.item.text), callback=self.retitled)
+        if self.step == "what":                               # back to the Title row
+            return await self.action_back()
         if self.a.get("kind") != "single" or "action" not in self.rows():
             return
         if self.step != "action":
@@ -607,10 +615,8 @@ class ClarifyScreen(ModalScreen):
         self.step = "action"
         await self.show_step()
 
-    async def retitled(self, typed: str | None) -> None:
-        """The title changed on the card: tags typed at its end count as answers, ticked."""
-        if not typed:
-            return
+    def apply_title(self, typed: str) -> None:
+        """The Title row's words: tags typed at the end count as answers, ticked."""
         old, new = self.item, model.retitle(self.item, typed)
         known = list(self.a.get("known", []))
         for step, key, value in (("project", "existing", new.project), ("context", "context", new.context),
@@ -628,7 +634,6 @@ class ClarifyScreen(ModalScreen):
         self.a["title"] = new.text
         self.item = new
         self.query_one("#card-item", Static).update(self.item_text())
-        self.draw_rows()
 
     async def contexts_edited(self, _) -> None:
         self.contexts = self.app.context_choices(self.item.area)
