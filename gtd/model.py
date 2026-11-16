@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import calendar
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from enum import Enum
 
@@ -198,8 +198,39 @@ def slugify(text: str) -> str:
 
 # Capture
 
+def _tag(item: Item, word: str) -> bool:
+    """Set one typed tag (@context, +project, waiting:who, due: or start: a date) on the item;
+    False when the word is not one."""
+    key, _, value = word.partition(":")
+    if word.startswith("@") and len(word) > 1:
+        item.context = " ".join(dict.fromkeys([word, *item.contexts]))
+    elif word.startswith("+") and len(word) > 1:
+        item.project = word[1:]
+    elif key == "waiting" and value:
+        item.waiting = value
+    elif key in ("due", "start") and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        try:
+            setattr(item, key, date.fromisoformat(value))
+        except ValueError:
+            return False
+    else:
+        return False
+    return True
+
+
+def retitle(item: Item, typed: str) -> Item:
+    """A copy with a new title. Tags typed at its end, in any order, are taken out and set;
+    every tag the item already had stays, so changing the words never loses one."""
+    words = typed.split()
+    new = replace(item, text="")
+    while len(words) > 1 and _tag(new, words[-1]):
+        words.pop()
+    new.text = " ".join(words)
+    return new
+
+
 def capture(doc: Doc, text: str, today: date) -> Item:
-    item = Item(text=text.strip(), added=today)
+    item = retitle(Item(text="", added=today), text)
     doc.items(Section.IN).append(item)
     return item
 

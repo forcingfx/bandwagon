@@ -1572,3 +1572,61 @@ def test_the_first_run_offers_the_gtd_files_found_in_the_home_folder(tmp_path, m
     app, screen, rows = files_app(cfg, "enter", "ctrl+u", T("notes"))
     assert list(app.areas) == ["notes"] and app.areas["notes"].file == found
     assert screen == "FilesScreen" and rows[0].startswith("notes") and "Found in your home folder:" not in rows
+
+
+CARRIED_IN = ("<!-- gtd v1 -->\n\n## In\n- [ ] Tell Mike yes or no @calls +q4-offsite due:2026-11-20\n"
+              "## Projects\n- [ ] Q4 offsite plan +q4-offsite\n")
+
+
+def test_clarifying_an_in_item_keeps_what_it_already_says(tmp_path):
+    from gtd.clarify import carried_from_item
+    item = store.parse_item("- [ ] Tell Mike @calls +q4-offsite due:2026-11-20")
+    a = carried_from_item(item)
+    assert sorted(a["known"]) == ["context", "dates", "project"] and a["existing"] == "q4-offsite"
+    assert carried_from_item(store.parse_item("- [ ] Bare")) == {"known": []}
+    path = tmp_path / "gtd.md"
+    path.write_text(CARRIED_IN)
+    run(path, "c", "1", "1")                                    # one action, defer: project, context, due carried
+    [item] = store.load(path).items(Section.NEXT)
+    assert (item.project, item.context, str(item.due)) == ("q4-offsite", "@calls", "2026-11-20")
+    assert store.load(path).items(Section.IN) == []
+
+
+def test_escape_goes_back_to_a_carried_row_to_change_it(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text(CARRIED_IN)
+    run(path, "c", "1", "1", "escape", "escape", "enter", "1", "enter")  # back past dates and context to how; defer; @calls
+    [item] = store.load(path).items(Section.NEXT)
+    assert item.project == "q4-offsite" and item.context == "@calls"
+
+
+def test_retitle_keeps_every_tag_and_takes_typed_ones_in_any_order():
+    item = store.parse_item("- [ ] Tell Mike @calls +payments src:https://x.y/z added:2026-11-06")
+    new = model.retitle(item, "Tell Mike yes or no")
+    assert new.line() == "- [ ] Tell Mike yes or no @calls +payments src:https://x.y/z added:2026-11-06"
+    new = model.retitle(item, "Tell Mike +offsite @deep due:2026-11-20")
+    assert (new.text, new.project, new.context, str(new.due)) == ("Tell Mike", "offsite", "@deep @calls", "2026-11-20")
+    assert model.retitle(item, "Email @john about it").text == "Email @john about it"   # mid-title @ stays words
+
+
+def test_capture_takes_tags_typed_in_any_order(tmp_path):
+    path = tmp_path / "gtd.md"
+    run(path, "a", T("Call Mike +offsite @calls"))
+    [item] = store.load(path).items(Section.IN)
+    assert (item.text, item.project, item.context, item.raw) == ("Call Mike", "offsite", "@calls", None)
+
+
+def test_e_edits_only_the_title_and_keeps_the_tags(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text("<!-- gtd v1 -->\n\n## In\n- [ ] Tell Mike @calls +offsite src:https://x.y/z added:2026-11-06\n")
+    run(path, "down", "e", "ctrl+u", T("Tell Mike yes or no"))
+    [item] = store.load(path).items(Section.IN)
+    assert item.line() == "- [ ] Tell Mike yes or no @calls +offsite src:https://x.y/z added:2026-11-06"
+
+
+def test_the_clarify_card_edits_the_title_and_keeps_the_tags(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text(CARRIED_IN)
+    run(path, "c", "e", "ctrl+u", T("Tell Mike no"), "1", "1")    # retitle, one action, defer: the rest carried
+    [item] = store.load(path).items(Section.NEXT)
+    assert (item.text, item.project, item.context, str(item.due)) == ("Tell Mike no", "q4-offsite", "@calls", "2026-11-20")

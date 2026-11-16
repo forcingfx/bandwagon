@@ -104,6 +104,26 @@ def prefill_from_item(item: model.Item, section: Section) -> dict:
     return {k: v for k, v in a.items() if v is not None}
 
 
+def carried_from_item(item: model.Item) -> dict:
+    """What an In item already says (project, context, who, dates), so clarifying it asks
+    only what is missing. The rows it fills are listed under "known"; the card ticks them
+    and moves past (Esc goes back to one to change it)."""
+    a: dict = {"known": []}
+    if item.project:
+        a["existing"] = item.project
+        a["known"].append("project")
+    if item.context:
+        a["context"] = item.context
+        a["known"].append("context")
+    if item.waiting:
+        a["who"] = item.waiting
+        a["known"].append("who")
+    if item.due or item.start:
+        a.update(due=item.due, start=item.start, dates_set=True)
+        a["known"].append("dates")
+    return {k: v for k, v in a.items() if v is not None}
+
+
 def row_value(step: str, a: dict, project_titles: dict[str, str]) -> str | None:
     """What an answered row shows, or None while it is unanswered."""
     if step == "what":
@@ -266,6 +286,7 @@ class ClarifyScreen(ModalScreen):
                 "project": "type to search · ↑↓ move · Enter take · 1-9 pick (empty box) · Esc back",
                 "context": "type to search · Space tick several · Enter take · 1-9 pick (empty box) · Esc back",
                 "dates": "↑↓ pick · Enter take · Tab due/start · Esc back",
+                "what": "1-9 pick · j k move · Enter take · e edit the title · Esc back",
                 }.get(
             self.step, "1-9 pick · j k move · Enter take · Esc back" if self.step in OPTION_STEPS
             else "Enter confirm · Esc back")
@@ -398,6 +419,9 @@ class ClarifyScreen(ModalScreen):
         if self.fields:
             return self.dismiss(self.a)
         nxt = next_step(self.step, self.a, bool(self.projects))
+        while nxt in self.a.get("known", []):                 # the item said it already: tick and move on
+            self.history.append(self.step)
+            self.step, nxt = nxt, next_step(nxt, self.a, bool(self.projects))
         if nxt == "commit":
             return self.dismiss(self.a)
         self.history.append(self.step)
@@ -414,6 +438,9 @@ class ClarifyScreen(ModalScreen):
                       "dest": Section.SOMEDAY if n == 3 else None}
             if single:
                 values["action"] = self.a.get("action") or self.item.text  # filled from the item, never asked twice
+            elif n == 2 and "project" in self.a.get("known", []):  # a new project, not the tag it came with
+                values["existing"] = None
+                self.a["known"] = [k for k in self.a["known"] if k != "project"]
             return await self.answer(**values)
         if step == "project":
             kind, value = self.project_choices[n - 1]
@@ -526,16 +553,45 @@ class ClarifyScreen(ModalScreen):
 
     async def action_rephrase(self) -> None:
         """e: back to the Action row to reword a one-action item's action; on the Context
-        row, the contexts editor instead."""
+        row, the contexts editor instead; before the item's type is chosen, its title."""
         if self.step == "context" and not self.sub and hasattr(self.app, "action_manage_contexts"):
             from .app import ContextsScreen
             return self.app.push_screen(ContextsScreen(), callback=self.contexts_edited)
-        if self.fields or self.a.get("kind") != "single" or "action" not in self.rows():
+        if self.fields:
+            return
+        if self.step == "what" and hasattr(self.app, "action_manage_contexts"):
+            from .app import TextScreen
+            prompt = "Title (its tags stay; add one at the end: @context +project)"
+            return self.app.push_screen(TextScreen(prompt, self.item.text), callback=self.retitled)
+        if self.a.get("kind") != "single" or "action" not in self.rows():
             return
         if self.step != "action":
             self.history.append(self.step)
         self.step = "action"
         await self.show_step()
+
+    async def retitled(self, typed: str | None) -> None:
+        """The title changed on the card: tags typed at its end count as answers, ticked."""
+        if not typed:
+            return
+        old, new = self.item, model.retitle(self.item, typed)
+        known = list(self.a.get("known", []))
+        for step, key, value in (("project", "existing", new.project), ("context", "context", new.context),
+                                 ("who", "who", new.waiting)):
+            if value != getattr(old, {"existing": "project", "who": "waiting"}.get(key, key)):
+                self.a[key] = value
+                known.append(step)
+        if (new.due, new.start) != (old.due, old.start):
+            self.a.update(due=new.due, start=new.start, dates_set=True)
+            known.append("dates")
+        self.a["known"] = list(dict.fromkeys(known))
+        for key in ("action", "outcome"):
+            if self.a.get(key) == old.text:
+                self.a[key] = new.text
+        self.a["title"] = new.text
+        self.item = new
+        self.query_one("#card-item", Static).update(self.item_text())
+        self.draw_rows()
 
     async def contexts_edited(self, _) -> None:
         self.contexts = self.app.context_choices()

@@ -23,7 +23,7 @@ from textual.widgets import Input, OptionList, Static
 from textual.widgets.option_list import Option
 
 from . import config, dates, model, store
-from .clarify import ClarifyScreen, prefill_from_item
+from .clarify import ClarifyScreen, carried_from_item, prefill_from_item
 from .model import Section, task_matches
 
 LIST_ORDER = [Section.IN, Section.NEXT, Section.PROJECTS, Section.WAITING, Section.SOMEDAY, Section.DONE]
@@ -1645,7 +1645,10 @@ class GTDApp(App):
     async def clarify(self, item: model.Item, source: Section | None = Section.IN,
                       start: str = "what", preset: dict | None = None) -> bool:
         """Run the clarify card for one item and apply the answers. False if you backed out.
-        preset is a dict, not **kwargs: its answer names (start, due, …) would collide."""
+        preset is a dict, not **kwargs: its answer names (start, due, …) would collide. An In
+        item with no preset keeps what it already says: its project, context, who and dates."""
+        if preset is None and source is Section.IN:
+            preset = carried_from_item(item)
         a = await self.push_screen_wait(self.card(item, start=start, preset=preset or {}))
         if a is None:
             return False
@@ -1668,6 +1671,8 @@ class GTDApp(App):
     def apply_clarify(self, d: model.Doc, a: dict, src: model.Item | None) -> None:
         keep_every = src.every if src is not None else None
         keep_star = src.star if src is not None else None
+        if a.get("title") and src is not None:   # retitled on the card (e)
+            src.text = a["title"]
         if a.get("actionable") is False:
             if a["dest"] is None:
                 model.trash(d, src)
@@ -2078,12 +2083,15 @@ class GTDApp(App):
         if not (item := self.selected()):
             return
         section = self.section_of(item)
-        locate, prefix = self.on_disk(section, item), item.line()[:6]
-        body = await self.text("Edit (tags at the end: @context +project waiting:who)",
-                               item.line()[6:] if item.raw is None else item.line())
-        if not body:
+        locate = self.on_disk(section, item)
+        if item.raw is not None:                 # a line the parser couldn't read: edit all of it
+            body = await self.text("Edit the line", item.line())
+            new = store.parse_item(body) if body else None
+        else:                                    # only the title: every tag stays
+            body = await self.text("Edit the title (its tags stay; add one at the end: @context +project)", item.text)
+            new = model.retitle(item, body) if body else None
+        if new is None:
             return
-        new = store.parse_item(prefix + body if item.raw is None else body)
 
         def replace(d):
             items = d.items(section)
