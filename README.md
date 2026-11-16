@@ -1,4 +1,4 @@
-# bandwagon
+# bandwagon: GTD in your terminal
 
 **bandwagon keeps your tasks in one plain markdown file per area of your life and runs David Allen's *Getting Things Done* over it from the terminal.** The command is `gtd`. With no arguments it opens the app. With a command it is a scripting CLI, and both read and write the same file. The file holds `- [ ]` lines under six `##` headings and nothing else. Any editor can read it, and an Obsidian vault takes it unchanged.
 
