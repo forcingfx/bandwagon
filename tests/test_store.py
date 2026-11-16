@@ -176,3 +176,12 @@ def test_prepare_creates_a_missing_file_and_adopts_a_foreign_one(tmp_path):
     partial.write_text("## Next Actions\n- [ ] Fine\nstray\n")
     store.prepare(partial, store.inspect(partial))
     assert partial.read_text() == "## Next Actions\n- [ ] Fine\nstray\n"   # left alone until the first change
+
+
+def test_find_task_files_skips_hidden_and_system_folders_and_respects_depth(tmp_path):
+    for rel in ["notes/work/gtd.md", "notes/home/GTD.md", ".obsidian/gtd.md", "Library/x/gtd.md",
+                "notes/work/other.md", "a/b/c/d/e/f/g/gtd.md"]:
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("")
+    found = {p.relative_to(tmp_path).as_posix() for p in store.find_task_files(tmp_path, max_depth=4)}
+    assert found == {"notes/work/gtd.md", "notes/home/GTD.md"}

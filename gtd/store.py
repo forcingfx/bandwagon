@@ -256,6 +256,31 @@ def inspect(path: Path) -> Report:
     return Report("ok", version=version, items=items)
 
 
+# Folders the search for task files never enters: system, package and build trees
+SKIP_DIRS = {"Library", "Applications", "node_modules", "venv", "site-packages", "__pycache__", "build", "dist"}
+
+
+def find_task_files(root: Path, max_depth: int = 6, max_dirs: int = 20000, limit: int = 20) -> list[Path]:
+    """Every gtd.md (any case) under root, newest first, for the Files screen to offer.
+    Hidden folders and SKIP_DIRS are not entered; depth and folder count are capped so a
+    big home folder still answers in a moment."""
+    found: list[Path] = []
+    seen = 0
+    root = Path(root)
+    for folder, dirs, files in os.walk(root):
+        seen += 1
+        depth = len(Path(folder).relative_to(root).parts)
+        dirs[:] = [] if depth >= max_depth or seen >= max_dirs else sorted(
+            d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS)
+        found += [Path(folder) / f for f in files if f.lower() == "gtd.md"]
+    def newest(path: Path) -> float:
+        try:
+            return -path.stat().st_mtime
+        except OSError:
+            return 0.0
+    return sorted(found, key=newest)[:limit]
+
+
 def prepare(path: Path, report: Report) -> None:
     """After consent: create a missing file with the six lists, or adopt a foreign one by
     writing it back through the parser (its lines are kept, the lists appended)."""

@@ -18,7 +18,7 @@ gtd --version
 
 ## The first run
 
-**`gtd` opens on the Files screen the first time, because nothing is configured yet.** `n` creates a task file. The default path is `gtd.md` in the current folder: run it inside your notes folder and the file stays there. `a` adds a file you already have. `F` brings the screen back at any time to add, move, rename or remove an area.
+**`gtd` opens on the Files screen the first time, because nothing is configured yet.** The screen lists every `gtd.md` it finds in your home folder, so a vault you already keep is one `Enter` away. Creating a file and typing a path are the last two rows. A new file defaults to `gtd.md` in the current folder: run it inside your notes folder and the file stays there. `F` brings the screen back at any time to add, move, rename or remove a vault.
 
 - **The app looks at every file before it loads it, and writes nothing until you say so.** A gtd file, or a path that does not exist yet, goes straight in. A plain markdown file is offered for adoption: the six lists are appended and its own lines stay where they are. A file with stray lines inside the lists, or with lists the app does not know, says so and keeps them. A file written by a newer gtd, or one that cannot be read, is refused.
 - **`gtd init PATH [--area NAME]` does the same from a script,** with no prompts.
@@ -74,7 +74,7 @@ completions_log = "~/notes/home/completions.md"   # a table of recurring and one
 - **`w` runs the weekly review as a guided tour of the lists in the book's order.** The status line shows the step and what to do in it. `n` moves on, and the last `n` records the review date.
 - **`f` filters Next Actions by context.** Next Actions groups one-off tasks by project with unassigned tasks first, and recurring tasks sit in their own block.
 - **`s` stars an item for Focus.** Focus is a tab after In that lists every starred item across every area until it is done or unstarred. `d` shows or hides deferred tasks, whose start date is still ahead.
-- **`v` cycles the areas, `L` edits the contexts and `F` edits the files.** The Project and Context rows are search boxes: type to narrow, `Enter` takes, and the last row creates a new entry from the words typed.
+- **`v` cycles the areas, `L` edits the contexts and `F` edits the files and vaults.** The Project and Context rows are search boxes: type to narrow, `Enter` takes, and the last row creates a new entry from the words typed.
 
 ## The command line
 

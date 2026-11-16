@@ -1,5 +1,7 @@
 """Drive the TUI headlessly with Textual's Pilot and check the file on disk."""
 import asyncio
+
+import pytest
 from datetime import date
 
 from gtd import store
@@ -1473,6 +1475,12 @@ def test_opener_and_clipboard_match_the_platform():
 
 # The Files screen: create or pick a task file, looked at before it loads
 
+@pytest.fixture(autouse=True)
+def no_home_search(monkeypatch):
+    """The Files screen searches the home folder; tests must not see the real one."""
+    monkeypatch.setattr(store, "find_task_files", lambda root: [])
+
+
 def files_app(cfg, *keys):
     from gtd import config
 
@@ -1550,3 +1558,17 @@ def test_F_lists_areas_with_their_state_and_removes_one(tmp_path):
     app, screen, _ = files_app(cfg, "F", "down", "backspace", "1")
     assert list(app.areas) == ["work"] and "[areas.home]" not in cfg.read_text() and h.exists()
     assert app.view_areas == ["work"] and screen == "FilesScreen"
+
+
+def test_the_first_run_offers_the_gtd_files_found_in_the_home_folder(tmp_path, monkeypatch):
+    cfg = tmp_path / "config.toml"
+    found = tmp_path / "notes" / "gtd.md"
+    found.parent.mkdir()
+    found.write_text("<!-- gtd v1 -->\n\n## In\n- [ ] One\n")
+    monkeypatch.setattr(store, "find_task_files", lambda root: [found])
+    app, screen, rows = files_app(cfg)
+    assert screen == "FilesScreen" and rows[-2:] == ["Create a new task file…", "Type the path of another file…"]
+    assert any("1 task" in r for r in rows) and "Found in your home folder:" in rows
+    app, screen, rows = files_app(cfg, "enter", "ctrl+u", T("notes"))
+    assert list(app.areas) == ["notes"] and app.areas["notes"].file == found
+    assert screen == "FilesScreen" and rows[0].startswith("notes") and "Found in your home folder:" not in rows

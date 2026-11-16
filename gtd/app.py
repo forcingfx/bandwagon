@@ -1,6 +1,7 @@
 """Textual TUI for the five GTD steps: capture, clarify, organize, reflect, engage."""
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 import subprocess
@@ -72,7 +73,7 @@ HELP = [
     ("The five steps", [("a", "capture (Tab: save and capture another)"), ("c", "clarify In"),
                         ("w", "weekly review (n next step, Esc stop)"), ("f", "show one context in Next Actions"),
                         ("L", "contexts: add, rename, delete, reorder"),
-                        ("F", "files: create or pick a task file; add, move, rename or remove an area"),
+                        ("F", "files and vaults: pick a gtd.md found in your home folder, create one, move, rename or remove a vault"),
                         ("d", "show or hide deferred tasks, whose start date is still ahead")]),
     ("Everything else", [("/", "search tasks and commands"), ("?", "this screen"), ("Esc", "clear marks / stop review"),
                          ("q", "quit")]),
@@ -616,31 +617,43 @@ def context_name(text: str) -> str | None:
 
 
 class FilesScreen(ModalScreen):
-    """F: the task files, one per area, each looked at before it loads. n creates a file, a
-    adds one you have (a plain markdown file can be adopted; one from a newer gtd, or that
-    can't be read, is refused), e moves an area to another file, r renames it, ⌫ takes it
-    out of the config (the file stays), Enter shows only that area. Esc closes."""
+    """F: the task files, one per area, each looked at before it loads. Below the areas come
+    the gtd.md files found in the home folder, then Create and Type a path as last resorts.
+    Enter on a found file adds it (a plain markdown file can be adopted; one from a newer gtd,
+    or that can't be read, is refused), n creates a file, a types a path, e moves an area to
+    another file, r renames it, ⌫ takes it out of the config (the file stays), Enter on an
+    area shows only that area. Esc closes."""
 
     BINDINGS = [Binding("escape", "back", "Close"),
                 Binding("j", "cursor(1)", show=False), Binding("k", "cursor(-1)", show=False),
                 Binding("n", "new_file", show=False), Binding("a", "add_file", show=False),
                 Binding("e", "move", show=False), Binding("r", "rename", show=False),
                 Binding("backspace", "remove", show=False), Binding("delete", "remove", show=False)]
-    HINT = "n new file · a add existing · e change path · r rename · ⌫ remove · Enter show only · Esc close"
-    EMPTY = "No task file yet. Press n to create one, or a to add one you already have."
+    HINT = "Enter pick · n new file · a type a path · e change path · r rename · ⌫ remove · Esc close"
+    EMPTY = "No task file yet. Pick a file found below, or create one."
+    SEARCHING = "Looking for gtd.md files in your home folder…"
+    FOUND = "Found in your home folder:"
+    NEW, PATH = "+new", "+path"     # option ids; an area name can't hold a +
 
     def __init__(self) -> None:
         super().__init__()
         self.report: store.Report | None = None   # what inspect said about the file being added
+        self.found: list[Path] | None = None      # None while the home folder is being searched
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Static("Files", classes="question", markup=False)
+            yield Static("Files and vaults", classes="question", markup=False)
             yield OptionList(id="files")
             yield Static(self.HINT, classes="hint", markup=False)
 
     def on_mount(self) -> None:
         self.draw(0)
+        self.search()
+
+    @work(group="search")
+    async def search(self) -> None:
+        self.found = await self.nearby()
+        self.draw(None if self.app.areas else 0)
 
     def draw(self, at: int | None = None) -> None:
         options = self.query_one("#files", OptionList)
@@ -651,9 +664,19 @@ class FilesScreen(ModalScreen):
         rows = [Option(Content.assemble((f"{name:<{width}}", AREA_COLOURS.get(name, COUNT_COLOUR)),
                                         config.portable(area.file), ("  " + store.inspect(area.file).chip, "dim")),
                        id=name) for name, area in self.app.areas.items()]
-        options.add_options(rows or [Option(Content.styled(self.EMPTY, "dim italic"), disabled=True)])
-        if names:
-            options.highlighted = min(keep or 0, len(names) - 1)
+        if not rows:
+            rows.append(Option(Content.styled(self.EMPTY, "dim italic"), disabled=True))
+        if self.found is None:
+            rows.append(Option(Content.styled(self.SEARCHING, "dim italic"), disabled=True))
+        elif self.found:
+            rows.append(Option(Content.styled(self.FOUND, "dim"), disabled=True))
+            rows += [Option(Content.assemble("  " + config.portable(f), ("  " + store.inspect(f).chip, "dim")),
+                            id=f"found:{n}") for n, f in enumerate(self.found)]
+        rows += [Option(Content("Create a new task file…"), id=self.NEW),
+                 Option(Content("Type the path of another file…"), id=self.PATH)]
+        options.add_options(rows)
+        first = next(n for n, o in enumerate(rows) if not o.disabled)   # the first area, else the first found file
+        options.highlighted = min(keep or 0, len(names) - 1) if names else first
         options.focus()
 
     def current(self) -> str | None:
@@ -667,7 +690,7 @@ class FilesScreen(ModalScreen):
 
     def editable(self) -> bool:
         if self.app.config_path is None:
-            self.notify("Started with --file, so the config isn't in use and areas can't change here.",
+            self.notify("Started with --file, so the config isn't in use and vaults can't change here.",
                         severity="warning")
             return False
         return True
@@ -704,22 +727,35 @@ class FilesScreen(ModalScreen):
     async def action_add_file(self) -> None:
         await self.add(new=False)
 
-    async def add(self, new: bool) -> None:
+    @work(exclusive=True)
+    async def add_found(self, file: Path) -> None:
+        await self.add(new=False, file=file)
+
+    async def add(self, new: bool, file: Path | None = None) -> None:
         if not self.editable():
             return
-        default = str(Path.cwd() / "gtd.md") if new else ""
-        if not (typed := await self.app.text("Create the task file at" if new else "Add the task file at", default)):
-            return
-        file = Path(typed).expanduser().absolute()
+        if file is None:
+            default = str(Path.cwd() / "gtd.md") if new else ""
+            if not (typed := await self.app.text("Create the task file at" if new else "Add the task file at", default)):
+                return
+            file = Path(typed).expanduser().absolute()
         suggested = config.area_name(file.parent.name) or "main"
-        typed = await self.app.text("Name of this area (shown on the tabs)", suggested)
+        typed = await self.app.text("Name of this vault (shown on the tabs)", suggested)
         if typed is None or not (name := config.area_name(typed or suggested)):
             return
         if name in self.app.areas:
-            return self.notify(f"{name} is already an area.", severity="warning")
+            return self.notify(f"{name} is already a vault.", severity="warning")
         if await self.checked(file) and await self.apply(lambda: config.add_area(name, file, self.app.config_path), file):
+            if self.found:
+                self.found = [f for f in self.found if f != file]
             self.draw(len(self.app.areas) - 1)
             self.notify(f"Added {name}.")
+
+    async def nearby(self) -> list[Path]:
+        """The gtd.md files under the home folder that aren't an area yet."""
+        taken = {area.file.resolve() for area in self.app.areas.values()}
+        found = await asyncio.to_thread(store.find_task_files, Path.home())
+        return [f for f in found if f.resolve() not in taken]
 
     @work(exclusive=True)
     async def action_move(self) -> None:
@@ -753,9 +789,16 @@ class FilesScreen(ModalScreen):
 
     @on(OptionList.OptionSelected)
     async def chosen(self, event: OptionList.OptionSelected) -> None:
-        if event.option.id in self.app.areas:
-            await self.app.action_show_area(event.option.id)
+        picked = event.option.id or ""
+        if picked in self.app.areas:
+            await self.app.action_show_area(picked)
             self.dismiss(None)
+        elif picked.startswith("found:") and self.found:
+            self.add_found(self.found[int(picked.removeprefix("found:"))])
+        elif picked == self.NEW:
+            self.action_new_file()
+        elif picked == self.PATH:
+            self.action_add_file()
 
     def action_back(self) -> None:
         if not self.app.areas:
@@ -875,7 +918,7 @@ class GTDApp(App):
         Binding("h", "edit_field('dates')", "Dates", show=False),
         Binding("p", "edit_field('who')", "Waiting for", show=False),
         Binding("L", "manage_contexts", "Contexts", show=False),
-        Binding("F", "manage_files", "Files", show=False),
+        Binding("F", "manage_files", "Files and vaults", show=False),
         Binding("q", "quit", "Quit"),
     ]
     WATCH_SECONDS = 1.0  # how often to check gtd.md for edits made outside the app
@@ -1444,7 +1487,7 @@ class GTDApp(App):
             *self.area_entries(),
             ("Prune Done now", "", "prune_now"),
             (prune, "", "toggle_prune"),
-            ("Files: create or pick a task file", "F", "manage_files"),
+            ("Files and vaults: pick a gtd.md found in your home folder, or create one", "F", "manage_files"),
             ("Quit", "q", "quit"),
         ]
 
@@ -1453,7 +1496,7 @@ class GTDApp(App):
             return []
         entries = [("Switch vault: " + ", ".join(self.areas) + ", both", "v", "cycle_view")]
         entries += [(f"Show {name} only", "", f"show_area('{name}')") for name in self.areas]
-        entries.append(("Show all areas", "", "show_area('')"))
+        entries.append(("Show all vaults", "", "show_area('')"))
         entries += [(f"Captures go to {name}", "", f"capture_to('{name}')") for name in self.areas
                     if name != self.capture_area]
         return entries
@@ -1472,11 +1515,11 @@ class GTDApp(App):
         self.marked.clear()
         self.load()
         await self.render_lists()
-        self.notify(f"Showing {name or 'all areas'}.")
+        self.notify(f"Showing {name or 'all vaults'}.")
 
     def action_capture_to(self, name: str) -> None:
         self.capture_area = name
-        self.notify(f"Captures now go to {name} when all areas are showing.")
+        self.notify(f"Captures now go to {name} when all vaults are showing.")
 
     async def action_clear_proposals(self) -> None:
         count = sum(1 for i in self.doc.items(Section.IN) if i.src)
