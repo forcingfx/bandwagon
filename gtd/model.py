@@ -69,6 +69,7 @@ class Doc:
     sections: dict[str, list[Item]] = field(default_factory=dict)
     last_review: date | None = None
     prune_manual: bool = False  # True: Done is pruned only on demand, not on every write
+    contexts: list[str] | None = None  # this vault's own list, in order; None: the config's
     preamble: list[str] = field(default_factory=list)
 
     @classmethod

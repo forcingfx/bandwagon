@@ -487,9 +487,11 @@ class TextScreen(ModalScreen[str | None]):
 
 
 class ContextsScreen(ModalScreen):
-    """L: the contexts, in the order clarify offers them, with how many open items use each
-    across every vault. a adds, e renames (in every file and the config), ⌫ deletes (asking
-    first when items use it), J K move. Changes apply at once; Esc closes."""
+    """L: one vault's contexts, in the order clarify offers them, with how many of its open
+    items use each. The list lives in the vault's gtd.md; until it has one, the config's list
+    is shown and the first change writes it there. a adds, e renames (in the list and on the
+    vault's items), ⌫ deletes (asking first when items use it), J K move. Changes apply at
+    once; Esc closes."""
 
     BINDINGS = [Binding("escape", "back", "Close"),
                 Binding("j", "cursor(1)", show=False), Binding("k", "cursor(-1)", show=False),
@@ -498,13 +500,14 @@ class ContextsScreen(ModalScreen):
                 Binding("backspace", "delete", show=False), Binding("delete", "delete", show=False)]
     HINT = "a add · e rename · ⌫ delete · J K move · Esc close"
 
-    def __init__(self) -> None:
+    def __init__(self, area: str) -> None:
         super().__init__()
+        self.area = area
         self.mode: str | None = None   # "add", "rename" or "confirm" while one is under way
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Static("Contexts", classes="question", markup=False)
+            yield Static(f"Contexts · {self.area}", classes="question", markup=False)
             yield OptionList(id="contexts")
             yield Vertical(id="contexts-entry")
             yield Static(self.HINT, classes="hint", markup=False, id="contexts-hint")
@@ -513,7 +516,7 @@ class ContextsScreen(ModalScreen):
         self.draw(0)
 
     def draw(self, at: int | None = None) -> None:
-        names, counts = self.app.context_choices(), self.app.context_counts()
+        names, counts = self.app.context_choices(self.area), self.app.context_counts(self.area)
         options = self.query_one("#contexts", OptionList)
         keep = options.highlighted if at is None else at
         options.clear_options()
@@ -527,7 +530,7 @@ class ContextsScreen(ModalScreen):
 
     def current(self) -> str | None:
         n = self.query_one("#contexts", OptionList).highlighted
-        names = self.app.context_choices()
+        names = self.app.context_choices(self.area)
         return names[n] if n is not None and n < len(names) else None
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
@@ -537,13 +540,13 @@ class ContextsScreen(ModalScreen):
         options = self.query_one("#contexts", OptionList)
         options.action_cursor_down() if step > 0 else options.action_cursor_up()
 
-    def action_shift(self, step: int) -> None:
-        name, names = self.current(), self.app.context_choices()
+    async def action_shift(self, step: int) -> None:
+        name, names = self.current(), self.app.context_choices(self.area)
         if name is None or not 0 <= (to := names.index(name) + step) < len(names):
             return
         names.remove(name)
         names.insert(to, name)
-        self.app.save_context_order(names)
+        await self.app.save_context_order(names, self.area)
         self.draw(to)
 
     async def ask_text(self, mode: str, value: str = "") -> None:
@@ -565,8 +568,8 @@ class ContextsScreen(ModalScreen):
     async def action_delete(self) -> None:
         if not (name := self.current()):
             return
-        if not (used := self.app.context_counts().get(name, 0)):
-            await self.app.delete_context(name)
+        if not (used := self.app.context_counts(self.area).get(name, 0)):
+            await self.app.delete_context(name, self.area)
             return self.draw()
         self.mode = "confirm"
         self.query_one("#contexts-hint", Static).update(Content.assemble(
@@ -578,7 +581,7 @@ class ContextsScreen(ModalScreen):
             event.stop()
             name = self.current()
             await self.finish()
-            await self.app.delete_context(name)
+            await self.app.delete_context(name, self.area)
             self.draw()
 
     @on(Input.Submitted, "#contexts-input")
@@ -586,16 +589,16 @@ class ContextsScreen(ModalScreen):
         event.stop()
         new, mode, old = context_name(event.value), self.mode, self.current()
         await self.finish()
-        names = self.app.context_choices()
+        names = self.app.context_choices(self.area)
         if not new or (mode == "rename" and new == old):
             return
         if new in names:
             self.notify(f"{new} already exists.", severity="warning")
         elif mode == "add":
-            self.app.save_context_order(names + [new])
+            await self.app.save_context_order(names + [new], self.area)
             self.draw(len(names))
         elif old:
-            await self.app.rename_context(old, new)
+            await self.app.rename_context(old, new, self.area)
             self.draw()
 
     async def finish(self) -> None:
@@ -1634,7 +1637,7 @@ class GTDApp(App):
     def card(self, item: model.Item, **kw) -> ClarifyScreen:
         """The clarify card for an item, set up for its vault."""
         projects = [(self.title_of(item.area, p.project), p.project) for p in self.area_projects(item.area)]
-        return ClarifyScreen(item, projects=projects, contexts=self.context_choices(), today=self.today,
+        return ClarifyScreen(item, projects=projects, contexts=self.context_choices(item.area), today=self.today,
                              progress=self.clarify_progress, area=item.area if len(self.areas) > 1 else None,
                              area_colour=AREA_COLOURS.get(item.area, ""),
                              source=source_name(item.src) if item.src else None, date_state=self.DATE_STATE, **kw)
@@ -1673,6 +1676,9 @@ class GTDApp(App):
         keep_star = src.star if src is not None else None
         if a.get("title") and src is not None:   # retitled on the card (e)
             src.text = a["title"]
+        if new := [c for c in a.get("new_contexts", []) if c in (a.get("context") or "").split()]:
+            listed = d.contexts if d.contexts is not None else list(self.contexts)
+            d.contexts = listed + [c for c in new if c not in listed]   # named on the card: joins the list
         if a.get("actionable") is False:
             if a["dest"] is None:
                 model.trash(d, src)
@@ -1854,15 +1860,26 @@ class GTDApp(App):
         await self.render_lists()
         self.notify("Showing deferred tasks." if self.show_later else "Hiding deferred tasks.")
 
-    def context_choices(self) -> list[str]:
-        """The configured contexts in their order, then any others already in use."""
-        used = sorted({c for d in self.docs.values() for s in Section for i in d.items(s) for c in i.contexts})
-        return self.contexts + [c for c in used if c not in self.contexts]
+    def context_list(self, area: str) -> list[str]:
+        """A vault's own context list from its gtd.md, or the config's while it has none."""
+        own = self.docs[area].contexts if area in self.docs else None
+        return list(self.contexts if own is None else own)
 
-    def context_counts(self) -> dict[str, int]:
-        """Open items per context, across every vault."""
+    def context_choices(self, area: str | None = None) -> list[str]:
+        """A vault's list in its order, then any other context its items use. With no area,
+        the showing vaults' lists merged."""
+        areas = [area] if area else self.view_areas
+        listed = list(dict.fromkeys(c for a in areas for c in self.context_list(a)))
+        used = sorted({c for a in areas if a in self.docs for s in Section
+                       for i in self.docs[a].items(s) for c in i.contexts})
+        return listed + [c for c in used if c not in listed]
+
+    def context_counts(self, area: str | None = None) -> dict[str, int]:
+        """Open items per context, in one vault or (with no area) every vault."""
         counts: dict[str, int] = {}
-        for doc in self.docs.values():
+        for name, doc in self.docs.items():
+            if area and name != area:
+                continue
             for section in Section:
                 if section is not Section.DONE:
                     for item in doc.items(section):
@@ -1870,30 +1887,39 @@ class GTDApp(App):
                             counts[c] = counts.get(c, 0) + 1
         return counts
 
-    def save_context_order(self, names: list[str]) -> None:
-        self.contexts = list(names)
-        if self.config_path:
-            config.save_contexts(self.contexts, self.config_path)
+    async def save_context_order(self, names: list[str], area: str) -> None:
+        """Write a vault's context list into its gtd.md, as one undo step."""
+        await self.change(lambda d: setattr(d, "contexts", list(names)), area)
 
-    async def rename_context(self, old: str, new: str | None) -> None:
-        """Rename (or with None, remove) a context in every vault's file, as one undo step,
-        and in the configured list."""
-        names = self.context_choices()
-        users = [a for a, doc in self.docs.items()
-                 if any(old in i.contexts for s in Section for i in doc.items(s))]
-        if users:
-            await self.change_each({a: (lambda d: model.rename_context(d, old, new)) for a in users})
-        self.save_context_order([new if n == old else n for n in names if new or n != old])
+    async def rename_context(self, old: str, new: str | None, area: str) -> None:
+        """Rename (or with None, remove) a context in one vault: on its items and in its
+        list, as one undo step."""
+        names = [new if n == old else n for n in self.context_choices(area) if new or n != old]
+
+        def rename(d):
+            model.rename_context(d, old, new)
+            d.contexts = names
+        await self.change(rename, area)
         if self.context_filter == old:
             self.context_filter = new
             await self.render_lists()
         self.notify(f"Renamed {old} to {new}." if new else f"Deleted {old}.")
 
-    async def delete_context(self, name: str) -> None:
-        await self.rename_context(name, None)
+    async def delete_context(self, name: str, area: str) -> None:
+        await self.rename_context(name, None, area)
 
-    def action_manage_contexts(self) -> None:
-        self.push_screen(ContextsScreen())
+    @work(exclusive=True)
+    async def action_manage_contexts(self) -> None:
+        """L: the showing vault's contexts; with several showing, ask which vault first."""
+        if (area := await self.pick_area("Edit the contexts of which vault?")) is not None:
+            self.push_screen(ContextsScreen(area))
+
+    async def pick_area(self, question: str) -> str | None:
+        names = self.view_areas
+        if len(names) == 1:
+            return names[0]
+        n = await self.ask(question, names)
+        return names[n - 1] if n else None
 
     # Files: which task files the app works on
 

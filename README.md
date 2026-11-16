@@ -29,7 +29,7 @@ gtd --version
 ```toml
 # gtd config. One [areas.NAME] per task file; the app shows them side by side.
 capture = "work"                 # where captures land when every area is showing
-contexts = ["@calls", "@computer", "@office", "@home", "@errands", "@agendas"]   # offered in clarify, in order
+contexts = ["@calls", "@computer", "@office", "@home", "@errands", "@agendas"]   # for a vault whose gtd.md has no list
 
 [areas.work]
 file = "~/notes/work/gtd.md"
@@ -58,7 +58,7 @@ completions_log = "~/notes/home/completions.md"   # a table of recurring and one
 ## Done
 ```
 
-- **Each item is one `- [ ]` line with its tags at the end.** The tags are `@context`, `+project`, `waiting:who`, `every:weekly`, `start:`, `due:`, `added:`, `done:`, `star:` and `src:`, which records where an automated proposal came from. An item can carry several contexts side by side. The parser reads tags only from the end of a line, which means an `@` in the middle of a sentence stays text.
+- **Each item is one `- [ ]` line with its tags at the end.** The tags are `@context`, `+project`, `waiting:who`, `every:weekly`, `start:`, `due:`, `added:`, `done:`, `star:` and `src:`, which records where an automated proposal came from. An item can carry several contexts side by side. A vault's own context list sits under the header as `<!-- gtd contexts: @calls @office -->`; clarify offers that list in order, then any other context the file's lines use. A file without the line uses the config's list until `L` first changes it. The parser reads tags only from the end of a line, which means an `@` in the middle of a sentence stays text.
 - **A line the app cannot read is kept exactly as written,** and so is any `##` section it does not know. A hand edit is never destroyed.
 - **Links go in the task text in markdown's own forms.** `[label](url)` links anything, and `[[note|label]]` links a note beside the file, which is Obsidian's wikilink. `o` opens a link from the app, with `open` on macOS and `xdg-open` on Linux. When opening fails the link goes to the clipboard instead, through `pbcopy` on macOS and `wl-copy`, `xclip` or `xsel` on Linux. Under Sway, an Obsidian note is also pulled to the current workspace.
 - **Done items older than 14 days are dropped on write,** unless the header says `prune: manual`.
@@ -74,7 +74,7 @@ completions_log = "~/notes/home/completions.md"   # a table of recurring and one
 - **`w` runs the weekly review as a guided tour of the lists in the book's order.** The status line shows the step and what to do in it. `n` moves on, and the last `n` records the review date.
 - **`f` filters Next Actions by context.** Next Actions groups one-off tasks by project with unassigned tasks first, and recurring tasks sit in their own block.
 - **`s` stars an item for Focus.** Focus is a tab after In that lists every starred item across every area until it is done or unstarred. `d` shows or hides deferred tasks, whose start date is still ahead.
-- **`v` cycles the areas, `L` edits the contexts and `F` edits the files and vaults.** The Project and Context rows are search boxes: type to narrow, `Enter` takes, and the last row creates a new entry from the words typed.
+- **`v` cycles the vaults, `L` edits the showing vault's contexts and `F` edits the files and vaults.** The Project and Context rows are search boxes: type to narrow and `Enter` takes. On the Context row `Enter` ticks a context and waits on the Next step row, so several can be ticked before moving on; a number takes one context and moves on at once. The last row creates a new entry from the words typed, and a new context joins the vault's list.
 
 ## The command line
 

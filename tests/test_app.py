@@ -822,24 +822,28 @@ def test_several_contexts_round_trip_and_split():
     assert item.line() == "- [ ] Pick up the parcel @errands @calls +move added:2026-09-29"
 
 
-def test_context_picker_number_picks_one_space_toggles_several(tmp_path):
+def test_context_picker_number_picks_one_enter_and_space_tick_several(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(TWO_IN)
     run(path, "c", "1", "1", "2", "enter")                       # number: @computer alone, instantly; no dates
     assert store.load(path).items(Section.NEXT)[0].context == "@computer"
     path.write_text(TWO_IN)
-    run(path, "c", "1", "1", "space", "down", "space", "enter", "enter")   # toggle @calls and @computer
+    run(path, "c", "1", "1", "enter", "down", "down", "enter", "enter", "enter")  # tick @calls, @computer; Next step
+    assert store.load(path).items(Section.NEXT)[0].contexts == ["@calls", "@computer"]
+    path.write_text(TWO_IN)
+    run(path, "c", "1", "1", "space", "down", "space", "up", "up", "enter", "enter")  # Space ticks in place
     assert store.load(path).items(Section.NEXT)[0].contexts == ["@calls", "@computer"]
 
 
 def test_context_picker_searches_as_you_type_and_adds_a_new_one(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(TWO_IN)
-    run(path, "c", "1", "1", *"err", "enter", "enter")          # the only match: @errands; no dates
+    run(path, "c", "1", "1", *"err", "enter", "enter", "enter")  # the only match: @errands; Next step; no dates
     assert store.load(path).items(Section.NEXT)[0].context == "@errands"
     path.write_text(TWO_IN)
-    run(path, "c", "1", "1", "space", *"gar", "enter", "enter")  # tick @calls, then no match: New context; no dates
-    assert store.load(path).items(Section.NEXT)[0].contexts == ["@calls", "@gar"]
+    run(path, "c", "1", "1", "space", *"gar", "enter", "enter", "enter")  # tick @calls, New context @gar; on
+    doc = store.load(path)
+    assert doc.items(Section.NEXT)[0].contexts == ["@calls", "@gar"] and doc.contexts[-1] == "@gar"
 
 
 def test_configured_contexts_come_first_then_ones_in_use(tmp_path):
@@ -1207,7 +1211,7 @@ def test_m_searches_projects_as_you_type(tmp_path):
 def test_l_sets_contexts_and_p_moves_to_waiting(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text(FIELD_FILE)
-    run(path, "right", "l", "down", "space", "enter")    # @calls is already ticked; add @computer
+    run(path, "right", "l", "down", "down", "enter", "enter")    # @calls is already ticked; add @computer
     assert next_item(path).contexts == ["@calls", "@computer"]
     path.write_text(FIELD_FILE)
     run(path, "right", "p", T("Mike"))
@@ -1295,8 +1299,7 @@ def editor_run(tmp_path, areas, *keys):
                 await pilot.pause()
             return app
     app = asyncio.run(go())
-    from gtd import config as cfgmod
-    return app, cfgmod.contexts(cfg)
+    return app, store.load(areas["work"].file).contexts      # the work vault's own list, in its gtd.md
 
 
 def ctx_areas(tmp_path):
@@ -1308,24 +1311,25 @@ def ctx_areas(tmp_path):
 
 def test_contexts_editor_add_reorder(tmp_path):
     areas = ctx_areas(tmp_path)
-    app, saved = editor_run(tmp_path, areas, "L", "a", T("deep work"), "K")
+    app, saved = editor_run(tmp_path, areas, "L", "1", "a", T("deep work"), "K")   # 1: the work vault
     assert saved == ["@calls", "@computer", "@deep-work", "@home"]       # added at the end, then moved up one
 
 
-def test_contexts_editor_rename_updates_both_vaults(tmp_path):
+def test_contexts_editor_rename_changes_only_that_vault(tmp_path):
     areas = ctx_areas(tmp_path)
-    app, saved = editor_run(tmp_path, areas, "L", "e", "ctrl+u", T("phone"))
+    app, saved = editor_run(tmp_path, areas, "L", "1", "e", "ctrl+u", T("phone"))
     assert saved[0] == "@phone"
     assert store.load(areas["work"].file).items(Section.NEXT)[0].context == "@phone"
-    assert store.load(areas["home"].file).items(Section.NEXT)[0].contexts == ["@phone", "@home"]
+    home = store.load(areas["home"].file)
+    assert home.items(Section.NEXT)[0].contexts == ["@calls", "@home"] and home.contexts is None
 
 
 def test_contexts_editor_delete_asks_when_in_use(tmp_path):
     areas = ctx_areas(tmp_path)
-    app, saved = editor_run(tmp_path, areas, "L", "backspace", "1")      # @calls is used: confirm with 1
+    app, saved = editor_run(tmp_path, areas, "L", "1", "backspace", "1")  # work; @calls is used: confirm with 1
     assert "@calls" not in saved
     assert store.load(areas["work"].file).items(Section.NEXT)[0].context is None
-    assert store.load(areas["home"].file).items(Section.NEXT)[0].contexts == ["@home"]
+    assert store.load(areas["home"].file).items(Section.NEXT)[0].contexts == ["@calls", "@home"]
 
 
 def test_edit_the_list_row_in_the_context_picker_opens_the_editor(tmp_path):
@@ -1630,3 +1634,27 @@ def test_the_clarify_card_edits_the_title_and_keeps_the_tags(tmp_path):
     run(path, "c", "e", "ctrl+u", T("Tell Mike no"), "1", "1")    # retitle, one action, defer: the rest carried
     [item] = store.load(path).items(Section.NEXT)
     assert (item.text, item.project, item.context, str(item.due)) == ("Tell Mike no", "q4-offsite", "@calls", "2026-11-20")
+
+
+def test_each_vault_offers_its_own_list_then_the_contexts_its_lines_use(tmp_path):
+    areas = ctx_areas(tmp_path)
+    work = store.load(areas["work"].file)
+    work.contexts = ["@agendas", "@calls"]
+    store.save(areas["work"].file, work)
+
+    async def go():
+        app = GTDApp(areas, today=TODAY, contexts=["@calls", "@computer", "@home"])
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            return app.context_choices("work"), app.context_choices("home")
+    work_choices, home_choices = asyncio.run(go())
+    assert work_choices == ["@agendas", "@calls"]                       # its own list; nothing from home
+    assert home_choices == ["@calls", "@computer", "@home"]             # no list yet: the config's
+
+
+def test_the_context_list_line_round_trips_and_older_files_have_none():
+    text = "<!-- gtd v1 -->\n<!-- gtd contexts: @calls @office -->\n\n## In\n"
+    doc = store.parse(text)
+    assert doc.contexts == ["@calls", "@office"] and doc.preamble == []
+    assert store.serialize(doc).startswith(text)
+    assert store.parse("<!-- gtd v1 -->\n\n## In\n").contexts is None

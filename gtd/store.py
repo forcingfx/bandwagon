@@ -19,6 +19,7 @@ from typing import Callable
 from .model import Doc, Item, Section, prune_done, valid_every
 
 HEADER = re.compile(r"<!-- gtd v1(?: · last-review: (\d{4}-\d{2}-\d{2}))?( · prune: manual)? -->")
+CONTEXTS = re.compile(r"<!-- gtd contexts:(.*)-->")   # a vault's own context list, its own line
 VERSION = re.compile(r"<!--\s*gtd v(\d+)")   # any version, to tell a newer file apart before loading it
 MAX_BYTES = 5_000_000   # a task file bigger than this is something else
 ITEM = re.compile(r"^- \[( |x)\] (.+)$")
@@ -70,6 +71,8 @@ def parse(text: str) -> Doc:
         if (m := HEADER.fullmatch(line.strip())) and current is None:
             doc.last_review = _date(m.group(1)) if m.group(1) else None
             doc.prune_manual = bool(m.group(2))
+        elif (m := CONTEXTS.fullmatch(line.strip())) and current is None:
+            doc.contexts = m.group(1).split()
         elif line.startswith("## "):
             current = doc.sections.setdefault(line[3:].strip(), [])
         elif current is None:
@@ -86,7 +89,10 @@ def parse(text: str) -> Doc:
 def serialize(doc: Doc) -> str:
     review = f" · last-review: {doc.last_review}" if doc.last_review else ""
     prune = " · prune: manual" if doc.prune_manual else ""
-    out = [f"<!-- gtd v1{review}{prune} -->", *doc.preamble]
+    out = [f"<!-- gtd v1{review}{prune} -->"]
+    if doc.contexts is not None:
+        out.append("<!-- gtd contexts: " + " ".join(doc.contexts) + " -->")
+    out += doc.preamble
     for name, items in doc.sections.items():
         out += ["", f"## {name}", *(i.line() for i in items)]
     return "\n".join(out) + "\n"

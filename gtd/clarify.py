@@ -284,7 +284,7 @@ class ClarifyScreen(ModalScreen):
             return "Enter confirm · Esc back"
         return {"tasks": "Tab add another · Enter done · Esc back",
                 "project": "type to search · ↑↓ move · Enter take · 1-9 pick (empty box) · Esc back",
-                "context": "type to search · Space tick several · Enter take · 1-9 pick (empty box) · Esc back",
+                "context": "type to search · Enter or Space tick · → Next step row goes on · 1-9 take one and go on · Esc back",
                 "dates": "↑↓ pick · Enter take · Tab due/start · Esc back",
                 "what": "1-9 pick · j k move · Enter take · e edit the title · Esc back",
                 }.get(
@@ -343,9 +343,11 @@ class ClarifyScreen(ModalScreen):
             self.context_choices.append(("new", typed))
         elif not words:
             self.context_choices += [("new", None), ("edit", None)]
-        self.redraw_contexts(0)
+        self.redraw_contexts("1" if words else None)   # searching: the first match, not Next step
 
-    def redraw_contexts(self, highlight: int | None) -> None:
+    def redraw_contexts(self, highlight: str | None) -> None:
+        """The rows, by id: "done" (only once something is ticked) on top, unnumbered, so
+        the numbers 1-9 keep meaning the same contexts; then the choices, numbered."""
         def label(kind: str, value: str | None) -> str:
             if kind == "ctx":
                 return f"{'[x]' if value in self.toggled else '[ ]'} {value}"
@@ -354,9 +356,26 @@ class ClarifyScreen(ModalScreen):
             return "Edit the list…"
         widget = self.query_one("#context-results", OptionList)
         widget.clear_options()
-        widget.add_options([Option(Content(f"{n}  {label(k, v)}"), id=str(n))
-                            for n, (k, v) in enumerate(self.context_choices, 1)])
-        widget.highlighted = highlight if self.context_choices else None
+        rows = [Option(Content(f"{n}  {label(k, v)}"), id=str(n)) for n, (k, v) in enumerate(self.context_choices, 1)]
+        if self.toggled:
+            rows.insert(0, Option(Content.assemble(("→  Next step with ", "bold"), (" ".join(self.toggled), "bold")),
+                                  id="done"))
+        widget.add_options(rows)
+        ids = [o.id for o in rows]
+        widget.highlighted = ids.index(highlight) if highlight in ids else (0 if rows else None)
+
+    def context_row(self) -> str | None:
+        """The id of the highlighted context row."""
+        widget = self.query_one("#context-results", OptionList)
+        n = widget.highlighted
+        return None if n is None else widget.get_option_at_index(n).id
+
+    def tick(self, c: str, row: str | None) -> None:
+        self.toggled = [x for x in self.toggled if x != c] if c in self.toggled else self.toggled + [c]
+        if self.query_one("#context-search", Input).value:   # searched for it: clear for the next one
+            self.query_one("#context-search", Input).value = ""
+            self.fill_contexts("")
+        self.redraw_contexts(row)
 
     @on(Input.Changed, "#context-search")
     def context_typed(self, event: Input.Changed) -> None:
@@ -453,21 +472,34 @@ class ClarifyScreen(ModalScreen):
         if step == "how":
             return await self.answer(how=HOW_CODES[n - 1])
         if step == "context":
+            if n == 0:                                        # the Next step row: the ticked ones
+                return await self.answer(context=" ".join(self.toggled) or None)
             kind, value = self.context_choices[n - 1]
             if kind == "edit":
                 return await self.action_rephrase()
             if kind == "new" and not value:                   # Other…: name it first
                 self.sub = "other_context"
                 return await self.show_step()
-            picked = [c for c in self.contexts if c in self.toggled] + ([value] if kind == "new" else [])
-            if kind == "ctx" and (alone or not self.toggled):  # a number, or nothing ticked: this one alone
-                picked = [value]
-            return await self.answer(context=" ".join(picked))
+            if kind == "new":                                 # New context: <typed>, ticked
+                return self.add_context(value)
+            if alone:                                         # a number: this one alone, and on
+                return await self.answer(context=value)
+            return self.tick(value, "done")                   # Enter: tick it; the cursor waits on Next step
 
     async def on_key(self, event) -> None:
         if self.step in OPTION_STEPS and not self.sub and event.character and event.character.isdigit():
             event.stop()
             await self.pick_number(int(event.character))
+
+    def add_context(self, name: str) -> None:
+        """A context named on the card: offered from now on, ticked, and (once the card is
+        done) written into the vault's list."""
+        self.contexts = self.contexts + [name] if name not in self.contexts else self.contexts
+        self.a["new_contexts"] = list(dict.fromkeys([*self.a.get("new_contexts", []), name]))
+        if name not in self.toggled:
+            self.toggled = self.toggled + [name]
+        self.query_one("#context-search", Input).value = ""
+        self.fill_contexts("")
 
     async def pick_number(self, n: int) -> None:
         limit = {"what": len(TYPES), "how": len(HOWS), "project": len(self.project_choices),
@@ -480,14 +512,18 @@ class ClarifyScreen(ModalScreen):
         if self.step not in OPTION_STEPS or self.sub:
             return
         event.stop()
-        await self.choose(int(event.option.id))
+        await self.choose(0 if event.option.id == "done" else int(event.option.id))
 
     @on(Input.Submitted)
     async def submitted(self, event: Input.Submitted) -> None:
         event.stop()
         text = event.value.strip()
-        if self.step in ("project", "context") and not self.sub:
-            widget = self.query_one(f"#{self.step}-results", OptionList)
+        if self.step == "context" and not self.sub:
+            if (row := self.context_row()) is not None:
+                await self.choose(0 if row == "done" else int(row))
+            return
+        if self.step == "project" and not self.sub:
+            widget = self.query_one("#project-results", OptionList)
             if widget.highlighted is not None:
                 await self.choose(widget.highlighted + 1)
             return
@@ -499,7 +535,9 @@ class ClarifyScreen(ModalScreen):
         if self.sub == "other_context":
             if text:
                 self.sub = None
-                await self.answer(context=f"@{text.lstrip('@').replace(' ', '-')}")
+                name = f"@{text.lstrip('@').replace(' ', '-')}"
+                await self.show_step()
+                self.add_context(name)
             return
         if self.step == "tasks":
             return await self.add_task(keep_going=False)
@@ -530,12 +568,10 @@ class ClarifyScreen(ModalScreen):
     def action_toggle(self) -> None:
         if self.step != "context" or self.sub:
             return
-        n = self.query_one("#context-results", OptionList).highlighted
-        if n is None or self.context_choices[n][0] != "ctx":
+        row = self.context_row()
+        if row is None or row == "done" or self.context_choices[int(row) - 1][0] != "ctx":
             return
-        c = self.context_choices[n][1]
-        self.toggled = [x for x in self.toggled if x != c] if c in self.toggled else self.toggled + [c]
-        self.redraw_contexts(n)
+        self.tick(self.context_choices[int(row) - 1][1], row)
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         if action == "toggle":   # Space only toggles contexts; elsewhere it types a space
@@ -556,7 +592,8 @@ class ClarifyScreen(ModalScreen):
         row, the contexts editor instead; before the item's type is chosen, its title."""
         if self.step == "context" and not self.sub and hasattr(self.app, "action_manage_contexts"):
             from .app import ContextsScreen
-            return self.app.push_screen(ContextsScreen(), callback=self.contexts_edited)
+            return self.app.push_screen(ContextsScreen(self.item.area or next(iter(self.app.areas))),
+                                        callback=self.contexts_edited)
         if self.fields:
             return
         if self.step == "what" and hasattr(self.app, "action_manage_contexts"):
@@ -594,7 +631,7 @@ class ClarifyScreen(ModalScreen):
         self.draw_rows()
 
     async def contexts_edited(self, _) -> None:
-        self.contexts = self.app.context_choices()
+        self.contexts = self.app.context_choices(self.item.area)
         await self.show_step()
 
     async def action_back(self) -> None:
