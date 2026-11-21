@@ -662,7 +662,7 @@ def test_clarify_takes_own_captures_first(tmp_path):
 def test_clarify_skips_ticked_items_in_in(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text("<!-- gtd v1 -->\n\n## In\n- [x] Already done\n- [ ] Alpha\n- [ ] Beta\n")
-    app = run(path, "c", "4", "4")  # trash both open items; the ticked one is never offered
+    app = run(path, "c", "enter", "4", "enter", "4")  # trash both open items; the ticked one is never offered
     assert texts(path) == ["Already done"]
     assert app.status_text.startswith("In clear")
     assert app.clarify_progress is None
