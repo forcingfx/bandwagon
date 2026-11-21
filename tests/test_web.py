@@ -166,3 +166,21 @@ def test_over_http_a_stale_line_answers_409_with_fresh_state(server, areas):
                            {"Content-Type": "application/json"})
     assert status == 409
     assert "changed" in json.loads(body)["error"] and "state" in json.loads(body)
+
+
+def test_a_taken_port_says_so_instead_of_a_traceback(areas, monkeypatch):
+    busy = web.serve(areas, "work", CONTEXTS, "127.0.0.1", 0)
+    try:
+        monkeypatch.setattr(web.config, "contexts", lambda: CONTEXTS)
+        with pytest.raises(SystemExit) as e:
+            web.run(areas, "work", "127.0.0.1", busy.server_port, [])
+        assert "something else is using port" in str(e.value)
+    finally:
+        busy.server_close()
+
+
+def test_an_address_this_machine_lacks_points_at_the_tunnel(areas, monkeypatch):
+    monkeypatch.setattr(web.config, "contexts", lambda: CONTEXTS)
+    with pytest.raises(SystemExit) as e:
+        web.run(areas, "work", "192.0.2.1", 0, [])   # TEST-NET-1: never assigned to a real machine
+    assert "not an address of this machine" in str(e.value)

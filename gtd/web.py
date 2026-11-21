@@ -13,6 +13,7 @@ site from posting here).
 """
 from __future__ import annotations
 
+import errno
 import ipaddress
 import json
 from datetime import date
@@ -292,8 +293,26 @@ def serve(areas: dict[str, config.Area], capture: str, contexts: list[str], host
     return ThreadingHTTPServer((host, port), handler(areas, capture, contexts, allowed, today))
 
 
+def cant_listen(host: str, port: int, e: OSError) -> str:
+    """One plain message for a server that could not start, by what usually causes it."""
+    where = f"{host}:{port}"
+    if e.errno == errno.EADDRINUSE:
+        return (f"Can't listen on {where}: something else is using port {port}.\n"
+                f"A gtd web may already be running (systemctl --user status gtd-web), or run\n"
+                f"`ss -ltnp 'sport = :{port}'` to see what holds it. Or pick another: gtd web --port 8766")
+    if e.errno == errno.EADDRNOTAVAIL:
+        return (f"Can't listen on {where}: {host} is not an address of this machine.\n"
+                "If it is the WireGuard address, bring the tunnel up first (ip -brief addr shows them).")
+    if e.errno == errno.EACCES:
+        return f"Can't listen on {where}: permission denied. Ports below 1024 need root; use the default 8765."
+    return f"Can't listen on {where}: {e.strerror or e}"
+
+
 def run(areas: dict[str, config.Area], capture: str, host: str, port: int, allow_hosts: list[str]) -> None:
-    server = serve(areas, capture, config.contexts(), host, port, allow_hosts)
+    try:
+        server = serve(areas, capture, config.contexts(), host, port, allow_hosts)
+    except OSError as e:
+        raise SystemExit(cant_listen(host, port, e)) from None
     shown = f"[{host}]" if ":" in host else host
     files = ", ".join(f"{a} ({config.portable(Path(s.file))})" for a, s in areas.items())
     print(f"gtd web on http://{shown}:{server.server_port}/ serving {files}. Ctrl-C stops it.", flush=True)
