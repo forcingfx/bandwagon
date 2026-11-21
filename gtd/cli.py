@@ -21,7 +21,7 @@ commands, never by hand, so every write goes through the parser and the atomic w
     gtd expire [--days 7]                 drop proposals left in In for 7 days into a log
     gtd sweep                             file checkboxes ticked in Obsidian: one-off items go
                                           to Done, recurring ones roll their due date forward
-    gtd web [--host IP] [--port 8765]     serve a page for the phone over a private network
+    gtd web [--host IP] [--port 8766]     serve a page for the phone over a private network
 """
 from __future__ import annotations
 
@@ -35,6 +35,9 @@ from pathlib import Path
 
 from . import __version__, config, dates, helptext, model, store
 from .model import Section
+
+# gtd web's port. Not 8765, which other small local servers tend to take.
+WEB_PORT = 8766
 
 SECTIONS = {s.name.lower(): s for s in Section} | {s.value.lower(): s for s in Section}
 OVERFLOW_KEEP_DAYS = 7
@@ -390,7 +393,7 @@ def main(argv: list[str] | None = None, today: date | None = None) -> None:
     p = sub.add_parser("web", help="serve a page for the phone")
     p.add_argument("--host", default="127.0.0.1",
                    help="address to listen on, e.g. the WireGuard one (default: 127.0.0.1)")
-    p.add_argument("--port", type=int, default=8765, help="port to listen on (default: 8765)")
+    p.add_argument("--port", type=int, default=WEB_PORT, help=f"port to listen on (default: {WEB_PORT})")
     p.add_argument("--allow-host", action="append", default=[], metavar="NAME",
                    help="a host name the phone uses for this machine; IP addresses always work")
     helptext.finish(sub)

@@ -299,12 +299,12 @@ def cant_listen(host: str, port: int, e: OSError) -> str:
     if e.errno == errno.EADDRINUSE:
         return (f"Can't listen on {where}: something else is using port {port}.\n"
                 f"A gtd web may already be running (systemctl --user status gtd-web), or run\n"
-                f"`ss -ltnp 'sport = :{port}'` to see what holds it. Or pick another: gtd web --port 8766")
+                f"`ss -ltnp 'sport = :{port}'` to see what holds it. Or pick another: gtd web --port {port + 1}")
     if e.errno == errno.EADDRNOTAVAIL:
         return (f"Can't listen on {where}: {host} is not an address of this machine.\n"
                 "If it is the WireGuard address, bring the tunnel up first (ip -brief addr shows them).")
     if e.errno == errno.EACCES:
-        return f"Can't listen on {where}: permission denied. Ports below 1024 need root; use the default 8765."
+        return f"Can't listen on {where}: permission denied. Ports below 1024 need root; use the default {cli.WEB_PORT}."
     return f"Can't listen on {where}: {e.strerror or e}"
 
 

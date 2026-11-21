@@ -102,7 +102,7 @@ gtd list --area home --section next     # JSON
 **`gtd web` serves a page for the phone from the machine that holds your task files.** It captures to In, shows every list with Next Actions grouped and filtered by context, and ticks, stars, edits, moves and deletes, each with an Undo. Clarify and the weekly review stay in the app. Every change goes through the same lock and parser as the app and the CLI, so all three can run at once, and a task changed elsewhere since the page loaded is refused rather than guessed at.
 
 - **There is no login, so serve it only on a private network.** It listens on `127.0.0.1` unless `--host` says otherwise. Give it the machine's WireGuard or Tailscale address, never a public one. The page refuses requests addressed to a host name it doesn't know, which keeps other websites from reaching it through your browser; `--allow-host NAME` adds a name you use for the machine. IP addresses always work.
-- **On the phone, open `http://ADDRESS:8765/` with the tunnel up and add it to the home screen.** It then opens full screen like an app.
+- **On the phone, open `http://ADDRESS:8766/` with the tunnel up and add it to the home screen.** It then opens full screen like an app.
 
 On a Linux box whose WireGuard address is `10.8.0.1`, a user service keeps it running:
 
@@ -127,7 +127,7 @@ loginctl enable-linger "$USER"      # keep it running when you are logged out
 journalctl --user -u gtd-web -f     # its log
 ```
 
-`Restart=always` covers a boot where the tunnel comes up after the service: it retries every five seconds until the address exists. Check the box's firewall allows port 8765 on the WireGuard interface.
+`Restart=always` covers a boot where the tunnel comes up after the service: it retries every five seconds until the address exists. Check the box's firewall allows port 8766 on the WireGuard interface.
 
 ## Development
 

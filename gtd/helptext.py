@@ -129,7 +129,7 @@ COMMANDS = {
             "share the app's lock, so the app, the CLI and the page can run together.",
             'Example:\n'
             '  gtd web --host 10.8.0.1\n'
-            '      gtd web on http://10.8.0.1:8765/ serving work (~/notes/work/gtd.md) ...'),
+            '      gtd web on http://10.8.0.1:8766/ serving work (~/notes/work/gtd.md) ...'),
     "sweep": ("File the tasks you ticked in the file itself: one-off tasks move to Done,\n"
               "repeating ones roll their due date forward. Run by a timer.",
               'Example:\n'
