@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="gtd">
+<meta name="theme-color" content="#16181d">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon.svg">
+<title>gtd</title>
+<style>
+:root {
+  --bg: #f6f7f9; --card: #ffffff; --ink: #1b1d22; --dim: #6b7280; --line: #e3e5ea;
+  --accent: #2f6fed; --accent-ink: #ffffff; --warn: #c2410c; --bad: #c81e1e; --star: #d99a00;
+  --chip: #eef0f4; --sheet: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181d; --card: #1f2229; --ink: #e8eaee; --dim: #9aa1ad; --line: #2c3039;
+    --accent: #5b8cff; --accent-ink: #0d1117; --warn: #fb923c; --bad: #f87171; --star: #fbbf24;
+    --chip: #2a2e37; --sheet: #23262e;
+  }
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+body { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+header { position: sticky; top: 0; z-index: 5; background: var(--bg);
+  padding: calc(8px + env(safe-area-inset-top)) 12px 0; border-bottom: 1px solid var(--line); }
+.top { display: flex; align-items: center; gap: 8px; }
+.top h1 { font-size: 20px; margin: 0; flex: 1; }
+select, input, button { font: inherit; color: inherit; }
+select { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; }
+.tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; margin: 8px -12px 0; padding: 0 12px; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { flex: none; border: 0; background: none; padding: 10px 10px 12px; color: var(--dim);
+  border-bottom: 3px solid transparent; font-weight: 600; white-space: nowrap; }
+.tab.on { color: var(--ink); border-color: var(--accent); }
+.tab .n { font-weight: 400; font-size: 13px; margin-left: 3px; }
+main { padding: 8px 12px; }
+.filters { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 4px; }
+.pill { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 5px 12px; font-size: 14px; }
+.pill.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); margin: 18px 4px 6px; font-weight: 600; }
+h2 .stalled { color: var(--warn); text-transform: none; letter-spacing: 0; font-weight: 400; }
+ul { list-style: none; margin: 0; padding: 0; background: var(--card); border-radius: 14px; overflow: hidden;
+  border: 1px solid var(--line); }
+li { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; border-top: 1px solid var(--line); }
+li:first-child { border-top: 0; }
+li.later { opacity: .55; }
+.tick { flex: none; width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--dim); background: none;
+  margin-top: 1px; padding: 0; display: grid; place-items: center; }
+.tick.done { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.tick:active { transform: scale(.9); }
+.body { flex: 1; min-width: 0; }
+.text { overflow-wrap: anywhere; }
+.done-text { color: var(--dim); text-decoration: line-through; }
+.text a { color: var(--accent); }
+.note { color: var(--accent); }
+.meta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.chip { font-size: 12.5px; background: var(--chip); color: var(--dim); border-radius: 6px; padding: 1px 7px; }
+.chip.due { color: var(--ink); }
+.chip.today { color: var(--warn); font-weight: 600; }
+.chip.over { color: var(--bad); font-weight: 600; }
+.chip.area { background: none; border: 1px solid var(--line); }
+.star { flex: none; border: 0; background: none; font-size: 21px; line-height: 1; padding: 2px 2px 0; color: var(--dim); opacity: .45; }
+.star.on { opacity: 1; color: var(--star); }
+.empty { text-align: center; color: var(--dim); padding: 40px 12px; }
+.more { display: block; margin: 12px auto; border: 0; background: none; color: var(--accent); font-size: 15px; }
+form.capture { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: flex; gap: 8px;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); background: var(--bg); border-top: 1px solid var(--line); }
+form.capture input { flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--card); border-radius: 12px; padding: 11px 12px; }
+.btn { border: 0; border-radius: 12px; padding: 11px 16px; background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.toast { position: fixed; left: 12px; right: 12px; bottom: calc(80px + env(safe-area-inset-bottom)); z-index: 7;
+  background: var(--ink); color: var(--bg); border-radius: 12px; padding: 11px 14px; display: flex; gap: 12px;
+  align-items: center; box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+.toast span { flex: 1; overflow-wrap: anywhere; }
+.toast button { border: 0; background: none; color: var(--accent); font-weight: 700; }
+.toast.bad { background: var(--bad); color: #fff; }
+.toast.bad button { color: #fff; }
+dialog { border: 0; padding: 0; margin: auto auto 0; width: 100%; max-width: 560px; background: var(--sheet); color: var(--ink);
+  border-radius: 18px 18px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+dialog::backdrop { background: rgba(0,0,0,.4); }
+.sheet-title { padding: 16px 16px 8px; font-weight: 600; overflow-wrap: anywhere; }
+.sheet button.row { display: block; width: 100%; text-align: left; border: 0; border-top: 1px solid var(--line);
+  background: none; padding: 14px 16px; }
+.sheet button.row.danger { color: var(--bad); }
+.sheet .edit { display: flex; gap: 8px; padding: 8px 16px 16px; }
+.sheet .edit input { flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--card); border-radius: 10px; padding: 10px; }
+.hint { font-size: 13px; color: var(--dim); padding: 0 16px 12px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <h1>gtd</h1>
+    <select id="area" aria-label="Area"></select>
+  </div>
+  <nav class="tabs" id="tabs"></nav>
+</header>
+<main id="main"><p class="empty">Loading…</p></main>
+<form class="capture" id="capture" autocomplete="off">
+  <input id="captureText" placeholder="Capture to In…  (@context +project due:2026-12-01)" enterkeyhint="send">
+  <button class="btn" type="submit">Add</button>
+</form>
+<dialog id="sheet"><div class="sheet" id="sheetBody"></div></dialog>
+<script>
+"use strict";
+const TABS = [
+  ["In", "In"], ["Focus", "Focus"], ["Next Actions", "Next"], ["Waiting For", "Waiting"],
+  ["Projects", "Projects"], ["Someday/Maybe", "Someday"], ["Done", "Done"],
+];
+const OPEN = ["Next Actions", "Waiting For", "In", "Projects", "Someday/Maybe"];
+const saved = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
+const keep = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+let S = null;                       // the last state from the server
+let tab = saved("gtd.tab", "Next Actions");
+let area = saved("gtd.area", "");   // "" is every area
+let ctx = saved("gtd.ctx", "");
+let showLater = false;
+let toastTimer = null;
+
+const $ = id => document.getElementById(id);
+function el(tag, attrs = {}, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") n.className = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== null && v !== undefined && v !== false) n.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) if (kid !== null && kid !== undefined) n.append(kid);
+  return n;
+}
+
+async function call(path, body) {
+  const opts = body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  let res, data;
+  try {
+    res = await fetch(path, opts);
+    data = await res.json();
+  } catch (e) {
+    toast("Can't reach gtd web. Is the tunnel up?", null, true);
+    throw e;
+  }
+  if (data.state) { S = data.state; render(); }
+  if (!res.ok) { toast(data.error || res.statusText, null, true); throw new Error(data.error); }
+  return data;
+}
+
+async function refresh() {
+  const data = await call("/api/state");
+  S = data; render();
+}
+
+function act(action, item, extra = {}) {
+  return call("/api/" + action, { area: item.area, section: item.section, line: item.line, ...extra })
+    .then(r => toast(r.message, r.undo)).catch(() => {});
+}
+
+function toast(message, undo, bad = false) {
+  document.querySelector(".toast")?.remove();
+  clearTimeout(toastTimer);
+  const t = el("div", { class: "toast" + (bad ? " bad" : "") }, el("span", {}, message));
+  if (undo) t.append(el("button", { onclick: () => { t.remove();
+    call("/api/undo", undo).then(r => toast(r.message)).catch(() => {}); } }, "Undo"));
+  document.body.append(t);
+  toastTimer = setTimeout(() => t.remove(), undo ? 6000 : 3000);
+}
+
+// What is showing
+
+function areas() { return S.areas.filter(a => !area || a.name === area); }
+function items() { return areas().flatMap(a => a.items); }
+function multi() { return !area && S.areas.length > 1; }
+function stalled(a, slug) { return S.areas.find(x => x.name === a)?.stalled.includes(slug); }
+function inTab(t) {
+  const all = items();
+  if (t === "Focus") return OPEN.flatMap(s => all.filter(i => i.section === s && i.star && !i.done));
+  return all.filter(i => i.section === t);
+}
+function visible(list) { return showLater ? list : list.filter(i => !i.later); }
+
+function render() {
+  if (!S) return;
+  const sel = $("area");
+  const opts = [["", S.areas.length > 1 ? "All areas" : (S.areas[0]?.name ?? "")], ...S.areas.map(a => [a.name, a.name])];
+  if (S.areas.length === 1) opts.shift();
+  if (area && !S.areas.some(a => a.name === area)) area = "";
+  sel.replaceChildren(...opts.map(([v, label]) => el("option", { value: v, selected: v === area }, label)));
+  sel.hidden = S.areas.length < 2;
+
+  const tabs = TABS.filter(([t]) => t !== "Focus" || inTab("Focus").length || tab === "Focus");
+  $("tabs").replaceChildren(...tabs.map(([t, label]) => {
+    const n = t === "Done" ? null : visible(inTab(t)).filter(i => !i.done).length;
+    return el("button", { class: "tab" + (t === tab ? " on" : ""), onclick: () => { tab = t; keep("gtd.tab", t); render(); scrollTo(0, 0); } },
+      label, n ? el("span", { class: "n" }, String(n)) : null);
+  }));
+  const target = area || S.capture;
+  $("captureText").placeholder = `Capture to ${target} In…`;
+
+  const main = $("main");
+  main.replaceChildren(...view());
+}
+
+function view() {
+  const list = inTab(tab);
+  const later = list.filter(i => i.later).length;
+  const shown = tab === "Done" ? [...list].sort((a, b) => (b.done_on || "").localeCompare(a.done_on || "")) : visible(list);
+  const out = [];
+  if (tab === "Next Actions") out.push(contextFilter(shown));
+  let rows = shown;
+  if (tab === "Next Actions" && ctx) rows = rows.filter(i => i.contexts.includes(ctx));
+
+  if (!rows.length) out.push(el("p", { class: "empty" }, emptyText()));
+  else if (tab === "Next Actions") out.push(...grouped(rows));
+  else if (tab === "Projects") out.push(...projects(rows));
+  else if (tab === "Waiting For") out.push(...byKey(rows, i => i.waiting || "someone", k => "Waiting on " + k));
+  else out.push(listOf(rows));
+
+  if (later && tab !== "Done") out.push(el("button", { class: "more", onclick: () => { showLater = !showLater; render(); } },
+    showLater ? "Hide deferred" : `Show ${later} deferred`));
+  return out;
+}
+
+function emptyText() {
+  return { "In": "In is empty. Capture anything below.", "Focus": "Nothing starred.", "Done": "Nothing done in the last two weeks.",
+    "Next Actions": ctx ? `Nothing at ${ctx}.` : "No next actions." }[tab] || "Nothing here.";
+}
+
+function contextFilter(rows) {
+  const names = [...new Set(areas().flatMap(a => a.contexts))];
+  const count = c => rows.filter(i => i.contexts.includes(c)).length;
+  const used = names.filter(c => count(c) || c === ctx);
+  if (!used.length) return null;
+  const pill = (c, label) => el("button", { class: "pill" + (ctx === c ? " on" : ""),
+    onclick: () => { ctx = ctx === c ? "" : c; keep("gtd.ctx", ctx); render(); } }, label);
+  return el("div", { class: "filters" }, pill("", "All"), ...used.map(c => pill(c, `${c} ${count(c)}`)));
+}
+
+function grouped(rows) {
+  // As the app: one-off tasks by project, unassigned first; recurring tasks in their own block.
+  const once = rows.filter(i => !i.every), recurring = rows.filter(i => i.every);
+  const out = [];
+  const loose = once.filter(i => !i.project);
+  if (loose.length) out.push(listOf(loose));
+  const projects = [...new Set(once.filter(i => i.project).map(i => i.project))];
+  for (const p of projects) {
+    out.push(el("h2", {}, "+" + p), listOf(once.filter(i => i.project === p), { hideProject: true }));
+  }
+  if (recurring.length) {
+    recurring.sort((a, b) => (a.due || "9").localeCompare(b.due || "9"));
+    out.push(el("h2", {}, "Recurring"), listOf(recurring));
+  }
+  return out;
+}
+
+function projects(rows) {
+  const open = items().filter(i => !i.done && i.section !== "Projects" && i.section !== "Done");
+  return [listOf(rows, { extra: p => {
+    const n = open.filter(i => i.area === p.area && i.project === p.project).length;
+    return [el("span", { class: "chip" }, `${n} open`),
+            stalled(p.area, p.project) ? el("span", { class: "chip over" }, "no next action") : null];
+  } })];
+}
+
+function byKey(rows, key, title) {
+  const keys = [...new Set(rows.map(key))];
+  return keys.flatMap(k => [el("h2", {}, title(k)), listOf(rows.filter(i => key(i) === k), { hideWaiting: true })]);
+}
+
+function listOf(rows, opt = {}) {
+  return el("ul", {}, rows.map(i => row(i, opt)));
+}
+
+function dueChip(i) {
+  if (!i.due) return null;
+  const cls = i.due < S.today ? " over" : i.due === S.today ? " today" : "";
+  return el("span", { class: "chip due" + cls }, "due " + niceDate(i.due));
+}
+
+function niceDate(iso) {
+  const d = new Date(iso + "T12:00:00"), t = new Date(S.today + "T12:00:00");
+  const days = Math.round((d - t) / 86400000);
+  if (days === 0) return "today";
+  if (days === 1) return "tomorrow";
+  if (days === -1) return "yesterday";
+  const opts = { month: "short", day: "numeric" };
+  if (days > 1 && days < 7) opts.weekday = "short", delete opts.month, delete opts.day;
+  if (d.getFullYear() !== t.getFullYear()) opts.year = "numeric";
+  return d.toLocaleDateString(undefined, opts);
+}
+
+function textOf(i) {
+  const span = el("div", { class: "text" + (i.done ? " done-text" : "") });
+  for (const [label, target] of i.segments) {
+    if (target && /^(https?:|mailto:)/i.test(target)) {
+      span.append(el("a", { href: target, target: "_blank", rel: "noopener noreferrer", onclick: e => e.stopPropagation() }, label));
+    } else if (target) span.append(el("span", { class: "note" }, label));
+    else span.append(label);
+  }
+  return span;
+}
+
+function row(i, opt) {
+  const meta = [
+    multi() ? el("span", { class: "chip area" }, i.area) : null,
+    ...(i.section === "Projects" ? [] : i.contexts.map(c => el("span", { class: "chip" }, c))),
+    i.project && !opt.hideProject && i.section !== "Projects" ? el("span", { class: "chip" }, "+" + i.project) : null,
+    i.waiting && !opt.hideWaiting ? el("span", { class: "chip" }, "waiting: " + i.waiting) : null,
+    dueChip(i),
+    i.later ? el("span", { class: "chip" }, "starts " + niceDate(i.start)) : null,
+    i.every ? el("span", { class: "chip" }, "↻ " + i.every) : null,
+    tab === "Focus" ? el("span", { class: "chip" }, i.section) : null,
+    i.done_on ? el("span", { class: "chip" }, "done " + niceDate(i.done_on)) : null,
+    ...(opt.extra ? opt.extra(i) : []),
+  ].filter(Boolean);
+  const tick = el("button", { class: "tick" + (i.done ? " done" : ""), "aria-label": i.done ? "Reopen" : "Done",
+    onclick: e => { e.stopPropagation(); act(i.done ? "reopen" : "done", i); } }, i.done ? "✓" : "");
+  const star = i.done ? null : el("button", { class: "star" + (i.star ? " on" : ""), "aria-label": i.star ? "Unstar" : "Star",
+    onclick: e => { e.stopPropagation(); act("star", i); } }, i.star ? "★" : "☆");
+  return el("li", { class: i.later ? "later" : "", onclick: () => sheet(i) },
+    tick, el("div", { class: "body" }, textOf(i), meta.length ? el("div", { class: "meta" }, meta) : null), star);
+}
+
+// The sheet a tap on a task opens
+
+function sheet(i) {
+  const d = $("sheet"), body = $("sheetBody");
+  const close = () => d.close();
+  const go = (action, extra) => { close(); act(action, i, extra); };
+  const input = el("input", { value: i.text, enterkeyhint: "done", "aria-label": "Task text" });
+  const save = () => { const t = input.value.trim(); if (t && t !== i.text) go("edit", { text: t }); else close(); };
+  input.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); save(); } });
+  const moves = [["in", "In"], ["next", "Next Actions"], ["someday", "Someday/Maybe"]]
+    .filter(([, s]) => s !== i.section && !i.done && i.section !== "Projects");
+  body.replaceChildren(
+    el("div", { class: "sheet-title" }, textOf(i)),
+    el("form", { class: "edit", onsubmit: e => { e.preventDefault(); save(); } }, input, el("button", { class: "btn" }, "Save")),
+    el("div", { class: "hint" }, "Tags typed at the end are added: @calls +project due:2026-12-01 waiting:anna"),
+    i.done ? el("button", { class: "row", onclick: () => go("reopen") }, "Reopen")
+           : el("button", { class: "row", onclick: () => go("done") }, i.every ? "Done (roll to next due)" : "Done"),
+    i.done ? null : el("button", { class: "row", onclick: () => go("star") }, i.star ? "Unstar" : "Star for Focus"),
+    ...moves.map(([to, label]) => el("button", { class: "row", onclick: () => go("move", { to }) }, "Move to " + label)),
+    el("button", { class: "row danger", onclick: () => go("drop") }, "Delete"),
+    el("button", { class: "row", onclick: close }, "Cancel"),
+  );
+  d.showModal();
+  d.onclick = e => { if (e.target === d) close(); };
+}
+
+// Capture
+
+$("capture").addEventListener("submit", e => {
+  e.preventDefault();
+  const input = $("captureText"), text = input.value.trim();
+  if (!text) return;
+  call("/api/add", { area: area || S.capture, text })
+    .then(r => { input.value = ""; toast(r.message, r.undo); }).catch(() => {});
+});
+$("area").addEventListener("change", e => { area = e.target.value; keep("gtd.area", area); render(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh().catch(() => {}); });
+setInterval(() => { if (!document.hidden && !$("sheet").open) refresh().catch(() => {}); }, 30000);
+refresh().catch(() => {});
+</script>
+</body>
+</html>

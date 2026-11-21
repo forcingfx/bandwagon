@@ -314,7 +314,7 @@ def test_save_contexts_rewrites_only_that_line(tmp_path):
 # Help: never acts, fits 80 columns, everyday first, examples, where the docs live
 
 HELP_FORMS = [["--help"], ["-h"], ["help"]]
-SUBCOMMANDS = ["add", "propose", "done", "edit", "drop", "find", "list", "expire", "sweep", "init", "updates"]
+SUBCOMMANDS = ["add", "propose", "done", "edit", "drop", "find", "list", "expire", "sweep", "init", "updates", "web"]
 
 
 @pytest.fixture

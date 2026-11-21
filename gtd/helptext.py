@@ -26,6 +26,7 @@ Everyday
   gtd find "words"       Find tasks; in a terminal, pick to tick or star them.
   gtd init PATH          Add a task file to your config, made if missing.
   gtd updates            Say whether a newer release is out.
+  gtd web                Serve a page for your phone: capture, tick, star.
 
 Automation (for scripts, skills and timers)
   gtd propose "text" --src LINK
@@ -44,8 +45,6 @@ Options
 Examples
   gtd add "Call Anna re Q4 budget" --context calls --due fri
       Captured to work In: Call Anna re Q4 budget
-  gtd add "Renew passport" --area home
-      Captured to home In: Renew passport
   gtd done "Q4 budget"
       Ticked in work: Call Anna re Q4 budget
   gtd edit "Q4 budget" --start mon --due none
@@ -124,6 +123,13 @@ COMMANDS = {
              'Example:\n'
              '  gtd init ~/notes/gtd.md --area notes\n'
              '      Added notes: ~/notes/gtd.md (Not there yet: it will be created ...)'),
+    "web": ("Serve a page for your phone from this machine: capture to In, browse the\n"
+            "lists, tick, star, move and delete, with undo. There is no login, so\n"
+            "listen on a private network only, such as a WireGuard address. Writes\n"
+            "share the app's lock, so the app, the CLI and the page can run together.",
+            'Example:\n'
+            '  gtd web --host 10.8.0.1\n'
+            '      gtd web on http://10.8.0.1:8765/ serving work (~/notes/work/gtd.md) ...'),
     "sweep": ("File the tasks you ticked in the file itself: one-off tasks move to Done,\n"
               "repeating ones roll their due date forward. Run by a timer.",
               'Example:\n'
