@@ -21,6 +21,7 @@ commands, never by hand, so every write goes through the parser and the atomic w
     gtd expire [--days 7]                 drop proposals left in In for 7 days into a log
     gtd sweep                             file checkboxes ticked in Obsidian: one-off items go
                                           to Done, recurring ones roll their due date forward
+    gtd web [--host IP] [--port 8765]     serve a page for the phone over a private network
 """
 from __future__ import annotations
 
@@ -386,6 +387,12 @@ def main(argv: list[str] | None = None, today: date | None = None) -> None:
     p = sub.add_parser("init", help="add a task file to the config, creating it if needed")
     p.add_argument("path", type=Path)
     p.add_argument("--area", help="name for the area (default: the file's folder name)")
+    p = sub.add_parser("web", help="serve a page for the phone")
+    p.add_argument("--host", default="127.0.0.1",
+                   help="address to listen on, e.g. the WireGuard one (default: 127.0.0.1)")
+    p.add_argument("--port", type=int, default=8765, help="port to listen on (default: 8765)")
+    p.add_argument("--allow-host", action="append", default=[], metavar="NAME",
+                   help="a host name the phone uses for this machine; IP addresses always work")
     helptext.finish(sub)
     args = parser.parse_args(helptext.expand(sys.argv[1:] if argv is None else argv))
     today = today or date.today()
@@ -434,6 +441,9 @@ def main(argv: list[str] | None = None, today: date | None = None) -> None:
                           if section is None or s is section], indent=1))
     elif args.command == "sweep":
         print("\n".join(cmd_sweep(areas, today, getattr(args, "area", None))) or "Nothing ticked.")
+    elif args.command == "web":
+        from . import web
+        web.run(areas, capture, args.host, args.port, args.allow_host)
     elif args.command == "expire":
         print("\n".join(cmd_expire(areas, today, args.days, getattr(args, "area", None))) or "Nothing to expire.")
     else:
