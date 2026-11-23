@@ -1170,6 +1170,29 @@ def test_c_on_a_project_captures_tasks_into_it(tmp_path):
     assert nexts == [("Spec v2", "maps"), ("Review copy", "maps")]
 
 
+def test_esc_on_c_for_a_project_keeps_its_tasks(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text("<!-- gtd v1 -->\n\n## Projects\n- [ ] Maps relaunch +maps\n")
+    run(path, *["tab"] * 2, "c", *"Spec v2", "tab", *"Review copy", "escape")  # the first by Tab, the second typed
+    nexts = [(i.text, i.project, i.context) for i in store.load(path).items(Section.NEXT)]
+    assert nexts == [("Spec v2", "maps", None), ("Review copy", "maps", None)]
+
+
+def test_esc_on_c_for_a_project_with_nothing_typed_changes_nothing(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text("<!-- gtd v1 -->\n\n## Projects\n- [ ] Maps relaunch +maps\n")
+    run(path, *["tab"] * 2, "c", "escape")
+    assert store.load(path).items(Section.NEXT) == []
+
+
+def test_esc_from_a_new_projects_tasks_keeps_them_for_going_on(tmp_path):
+    path = tmp_path / "gtd.md"
+    path.write_text("<!-- gtd v1 -->\n\n## In\n- [ ] Q4 offsite\n")
+    run(path, "c", "enter", "2", T(""), *"Book venue", "escape", "enter", "enter", "1", "2", "enter")
+    [project] = store.load(path).items(Section.PROJECTS)
+    assert [(i.text, i.project) for i in store.load(path).items(Section.NEXT)] == [("Book venue", project.project)]
+
+
 def test_reclarify_moves_a_next_action_to_waiting_for(tmp_path):
     path = tmp_path / "gtd.md"
     path.write_text("<!-- gtd v1 -->\n\n## Next Actions\n- [ ] Budget numbers @computer every:monthly due:2026-10-01\n")

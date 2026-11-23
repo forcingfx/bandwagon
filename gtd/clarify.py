@@ -285,7 +285,7 @@ class ClarifyScreen(ModalScreen):
     def hint(self) -> str:
         if self.sub:
             return "Enter confirm · Esc back"
-        return {"tasks": "Tab add another · Enter done · Esc back",
+        return {"tasks": "Tab add another · Enter done · Esc " + ("back" if self.history else "save and close"),
                 "project": "type to search · ↑↓ move · Enter take · 1-9 pick (empty box) · Esc back",
                 "context": ("Space tick · Enter go on" + (f" with {' '.join(self.toggled)} +this" if self.toggled else "")
                             + " · 1-9 just that one · type to search · Esc back"),
@@ -557,16 +557,18 @@ class ClarifyScreen(ModalScreen):
             return
         await self.answer(**{self.step: text})
 
-    async def add_task(self, keep_going: bool) -> None:
+    def keep_typed_task(self) -> None:
+        """The words in the Tasks box join the list (and the box clears)."""
         box = self.query_one("#task-input", Input)
-        text = box.value.strip()
-        tasks = list(self.a.get("tasks") or [])
-        if text:
-            tasks.append(text)
-            self.a["tasks"] = tasks
+        if text := box.value.strip():
+            self.a["tasks"] = [*(self.a.get("tasks") or []), text]
             box.value = ""
             self.query_one("#tasks-list", Static).update(self.tasks_list())
             self.draw_rows()
+
+    async def add_task(self, keep_going: bool) -> None:
+        self.keep_typed_task()
+        tasks = list(self.a.get("tasks") or [])
         if not keep_going and tasks:
             await self.answer(tasks=tasks, action=tasks[0], extra_tasks=tasks[1:])
 
@@ -643,6 +645,11 @@ class ClarifyScreen(ModalScreen):
         if self.sub:
             self.sub = None
             return await self.show_step()
+        if self.step == "tasks":
+            self.keep_typed_task()
+            if not self.history and self.a.get("tasks"):     # c on a project: like the capture box,
+                tasks = self.a["tasks"]                       # Esc keeps the tasks it was given
+                return self.dismiss({**self.a, "how": "defer", "action": tasks[0], "extra_tasks": tasks[1:]})
         if not self.history:
             return self.dismiss(None)
         self.step = self.history.pop()
